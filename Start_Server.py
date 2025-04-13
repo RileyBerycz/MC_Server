@@ -149,7 +149,8 @@ def signal_handler(sig, frame):
 def launch_minecraft_server(jar_path, java_args="-Xmx1024M -Xms1024M"):
     """Launch a Minecraft server using the specified JAR file."""
     try:
-        cmd = f"java {java_args} -jar {jar_path} nogui"
+        # Modified command for newer Minecraft versions
+        cmd = f"java {java_args} -jar {jar_path} --nogui"
         logger.info(f"Launching Minecraft server with command: {cmd}")
         
         # Start the Minecraft server process with stdin pipe for commands

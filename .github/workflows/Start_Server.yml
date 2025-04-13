@@ -38,6 +38,9 @@ jobs:
           distribution: 'adopt'
           java-version: '17'
           
+      - name: Verify Java installation
+        run: java -version
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -65,7 +68,8 @@ jobs:
         run: |
           if [ ! -f "server.jar" ]; then
             echo "Downloading Minecraft server jar..."
-            curl -o server.jar https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar
+            # Updated to the latest version 1.20.4 server jar
+            curl -o server.jar https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar
           fi
           
       - name: Accept EULA
