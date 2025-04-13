@@ -44,7 +44,7 @@ jobs:
           pip install pyngrok zipfile36 datetime
 
       - name: Download previous world backup if exists
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: minecraft-backup
           path: .
@@ -83,7 +83,7 @@ jobs:
           MAX_RUNTIME_MINUTES: "${{ github.event.inputs.max_runtime || '340' }}"
           
       - name: Upload world backup
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: minecraft-backup
