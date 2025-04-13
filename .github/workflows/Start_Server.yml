@@ -7,10 +7,22 @@ on:
         description: 'Memory allocation for Java (e.g. 1024M, 2G)'
         default: '1024M'
         required: false
+      backup_interval:
+        description: 'Backup interval in hours'
+        default: '6'
+        required: false
+      max_runtime:
+        description: 'Maximum runtime in minutes before restart'
+        default: '340'
+        required: false
+  schedule:
+    - cron: '0 */6 * * *'  # Run every 6 hours
       
 jobs:
   start-minecraft-server:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # GitHub's 6 hour limit
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -29,7 +41,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyngrok
+          pip install pyngrok zipfile36 datetime
+
+      - name: Download previous world backup if exists
+        uses: actions/download-artifact@v2
+        with:
+          name: minecraft-backup
+          path: .
+        continue-on-error: true
+        
+      - name: Extract backup if exists
+        run: |
+          if ls backup_*.zip 1> /dev/null 2>&1; then
+            echo "Found backup file. Extracting..."
+            latest_backup=$(ls -t backup_*.zip | head -1)
+            unzip -o "$latest_backup"
+            echo "Backup extracted successfully."
+          else
+            echo "No backup file found. Starting with fresh world."
+          fi
 
       - name: Download Minecraft Server if needed
         run: |
@@ -49,3 +79,20 @@ jobs:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
           MINECRAFT_JAR: "server.jar"
           MINECRAFT_PORT: "25565"
+          BACKUP_INTERVAL_HOURS: "${{ github.event.inputs.backup_interval || '6' }}"
+          MAX_RUNTIME_MINUTES: "${{ github.event.inputs.max_runtime || '340' }}"
+          
+      - name: Upload world backup
+        uses: actions/upload-artifact@v2
+        if: always()
+        with:
+          name: minecraft-backup
+          path: backup_*.zip
+          retention-days: 1
+          
+      - name: Trigger next run
+        if: ${{ !github.event.schedule }}  # Don't trigger if already running on schedule
+        uses: peter-evans/repository-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: restart-minecraft-server
