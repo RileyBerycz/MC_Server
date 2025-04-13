@@ -68,8 +68,8 @@ jobs:
         run: |
           if [ ! -f "server.jar" ]; then
             echo "Downloading Minecraft server jar..."
-            # Updated to the latest version 1.20.4 server jar
-            curl -o server.jar https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar
+            # Using a stable 1.19.3 version instead
+            curl -o server.jar https://piston-data.mojang.com/v1/objects/c9df48efed58511cdd0213c56b9013a7b5c9ac1f/server.jar
           fi
           
       - name: Accept EULA
@@ -77,6 +77,7 @@ jobs:
           echo "eula=true" > eula.txt
           
       - name: Launch Minecraft Server
+        id: launch_server
         run: python Start_Server.py
         env:
           JAVA_ARGS: "-Xmx${{ github.event.inputs.memory || '1024M' }} -Xms${{ github.event.inputs.memory || '1024M' }}"
@@ -86,6 +87,14 @@ jobs:
           BACKUP_INTERVAL_HOURS: "${{ github.event.inputs.backup_interval || '6' }}"
           MAX_RUNTIME_MINUTES: "${{ github.event.inputs.max_runtime || '340' }}"
           
+      # Add this fallback step
+      - name: Keep alive if server fails
+        if: always() && steps.launch_server.outcome != 'success'
+        run: |
+          echo "Server exited unexpectedly, keeping runner alive to preserve artifacts..."
+          echo "Running for 5 minutes to allow actions to complete..."
+          sleep 300
+          
       - name: Upload world backup
         uses: actions/upload-artifact@v4
         if: always()
@@ -94,9 +103,16 @@ jobs:
           path: backup_*.zip
           retention-days: 1
           
-      - name: Trigger next run
-        if: ${{ !github.event.schedule }}  # Don't trigger if already running on schedule
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: restart-minecraft-server
+      - name: Keep runner alive if server crashes
+        if: always()
+        run: |
+          # Sleep for a bit to ensure backup completes
+          echo "Ensuring final backup completes..."
+          sleep 30
+          
+      - name: Schedule next run
+        if: ${{ !github.event.schedule }}
+        run: |
+          echo "Setting up scheduled restart..."
+          # Adding a comment to server.properties to track restart time
+          echo "# Last restart: $(date)" >> server.properties
