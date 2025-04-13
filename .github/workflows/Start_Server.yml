@@ -35,7 +35,7 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'adopt'
+          distribution: 'temurin'  # Try Temurin instead of Adopt
           java-version: '17'
           
       - name: Verify Java installation
@@ -64,6 +64,13 @@ jobs:
           path: .
         continue-on-error: true
         
+      - name: Ensure backup environment
+        run: |
+          mkdir -p world
+          if [ ! -f "server.properties" ]; then
+            echo "level-name=world" > server.properties
+          fi
+
       - name: Extract backup if exists
         run: |
           if ls backup_*.zip 1> /dev/null 2>&1; then
@@ -78,9 +85,9 @@ jobs:
       - name: Download Minecraft Server if needed
         run: |
           if [ ! -f "server.jar" ]; then
-            echo "Downloading Paper server jar..."
-            # Using Paper - a more reliable server implementation
-            curl -o server.jar https://api.papermc.io/v2/projects/paper/versions/1.19.4/builds/550/downloads/paper-1.19.4-550.jar
+            echo "Downloading Purpur server jar..."
+            # Try Purpur instead of Paper
+            curl -o server.jar https://api.purpurmc.org/v2/purpur/1.19.4/latest/download
           fi
           
       - name: Accept EULA
@@ -100,21 +107,39 @@ jobs:
           BACKUP_INTERVAL_HOURS: "${{ github.event.inputs.backup_interval || '6' }}"
           MAX_RUNTIME_MINUTES: "${{ github.event.inputs.max_runtime || '340' }}"
           
-      - name: Run fallback if server fails
+      - name: Run extended fallback if server fails
         run: |
-          # Create a fallback backup in case the server failed
-          echo "Creating fallback backup..."
-          mkdir -p world
-          touch world/placeholder.txt
-          # Ensure we have a backup even if server didn't run
-          if [ ! -f backup_*.zip ]; then
-            zip -r backup_fallback_$(date +%Y%m%d_%H%M%S).zip world server.properties 2>/dev/null || true
-            echo "Created fallback backup."
-          fi
+          echo "Creating extended fallback process..."
           
-          # Keep runner alive for a bit to ensure GitHub doesn't terminate early
-          echo "Sleeping for 5 minutes to ensure workflow completes..."
-          sleep 300
+          # Create some dummy world data to ensure backup works
+          mkdir -p world/region
+          echo "This is a placeholder file" > world/placeholder.txt
+          
+          # Create a fallback backup
+          zip -r backup_fallback_$(date +%Y%m%d_%H%M%S).zip world server.properties 2>/dev/null || true
+          
+          # Start a long-running process to keep the GitHub Action alive
+          # This script will output periodic messages and run for 5 hours
+          echo '#!/bin/bash
+          echo "Starting fallback keep-alive process..."
+          start_time=$(date +%s)
+          end_time=$((start_time + 18000))  # 5 hours
+          
+          while [ $(date +%s) -lt $end_time ]; do
+            current=$(date +%s)
+            elapsed=$((current - start_time))
+            remaining=$((end_time - current))
+            echo "[$(date)] Fallback process running. Elapsed: $(($elapsed/60))m, Remaining: $(($remaining/60))m"
+            # Create periodic backups
+            if [ $(($elapsed % 3600)) -lt 60 ]; then
+              echo "Creating hourly backup..."
+              zip -r backup_hourly_$(date +%Y%m%d_%H%M%S).zip world server.properties 2>/dev/null || true
+            fi
+            sleep 600  # Print status every 10 minutes
+          done
+          ' > keepalive.sh
+          chmod +x keepalive.sh
+          ./keepalive.sh
           
       - name: Upload world backup
         uses: actions/upload-artifact@v4
