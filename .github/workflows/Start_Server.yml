@@ -13,7 +13,7 @@ on:
         required: false
       max_runtime:
         description: 'Maximum runtime in minutes before restart'
-        default: '340'
+        default: '359'
         required: false
   schedule:
     - cron: '0 */6 * * *'  # Run every 6 hours
@@ -25,15 +25,15 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9'
           
       - name: Set up Java
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
           distribution: 'adopt'
           java-version: '17'
@@ -44,7 +44,7 @@ jobs:
           pip install pyngrok zipfile36 datetime
 
       - name: Download previous world backup if exists
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: minecraft-backup
           path: .
@@ -83,7 +83,7 @@ jobs:
           MAX_RUNTIME_MINUTES: "${{ github.event.inputs.max_runtime || '340' }}"
           
       - name: Upload world backup
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         if: always()
         with:
           name: minecraft-backup
@@ -92,7 +92,7 @@ jobs:
           
       - name: Trigger next run
         if: ${{ !github.event.schedule }}  # Don't trigger if already running on schedule
-        uses: peter-evans/repository-dispatch@v1
+        uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: restart-minecraft-server
