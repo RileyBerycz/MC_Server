@@ -35,35 +35,26 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'  # Try Temurin instead of Adopt
+          distribution: 'temurin'
           java-version: '17'
           
       - name: Verify Java installation
-        run: java -version
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
           
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyngrok zipfile36 datetime
+          pip install pyngrok
 
-      - name: Check for previous backups
-        id: check_backups
-        run: |
-          if curl -s -o /dev/null -w "%{http_code}" https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=minecraft-backup | grep -q "200"; then
-            echo "BACKUP_EXISTS=true" >> $GITHUB_OUTPUT
-          else
-            echo "BACKUP_EXISTS=false" >> $GITHUB_OUTPUT
-            echo "No previous backups found. Starting with a fresh world."
-          fi
-
-      - name: Download previous world backup if exists
-        if: steps.check_backups.outputs.BACKUP_EXISTS == 'true'
+      - name: Try to download previous world backup
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: minecraft-backup
           path: .
-        continue-on-error: true
-        
+          
       - name: Ensure backup environment
         run: |
           mkdir -p world
@@ -76,7 +67,7 @@ jobs:
           if ls backup_*.zip 1> /dev/null 2>&1; then
             echo "Found backup file. Extracting..."
             latest_backup=$(ls -t backup_*.zip | head -1)
-            unzip -o "$latest_backup"
+            unzip -o "$latest_backup" || echo "Failed to extract backup, continuing with new world"
             echo "Backup extracted successfully."
           else
             echo "No backup file found. Starting with fresh world."
@@ -85,22 +76,27 @@ jobs:
       - name: Download Minecraft Server if needed
         run: |
           if [ ! -f "server.jar" ]; then
-            echo "Downloading Purpur server jar..."
-            # Try Purpur instead of Paper
-            curl -o server.jar https://api.purpurmc.org/v2/purpur/1.19.4/latest/download
+            echo "Downloading Minecraft server jar..."
+            # Try a vanilla server jar instead
+            curl -o server.jar https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar
           fi
           
       - name: Accept EULA
         run: |
           echo "eula=true" > eula.txt
           
+      - name: Test Java can run the server JAR
+        run: |
+          echo "Testing Java compatibility with server JAR..."
+          java -Xms128M -Xmx128M -jar server.jar --help || echo "Initial JAR test failed, but continuing"
+          
       - name: Launch Minecraft Server
         id: launch_server
         run: |
-          # Try to launch server, but continue workflow even if it fails
+          # Try to launch server with error handling
           python Start_Server.py || echo "Server failed to start or closed unexpectedly"
         env:
-          JAVA_ARGS: "-Xmx${{ github.event.inputs.memory || '1024M' }} -Xms${{ github.event.inputs.memory || '1024M' }}"
+          JAVA_ARGS: "-Xmx${{ github.event.inputs.memory || '1024M' }} -Xms${{ github.event.inputs.memory || '1024M' }} -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200"
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
           MINECRAFT_JAR: "server.jar"
           MINECRAFT_PORT: "25565"
