@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Management - Minecraft Server Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Player Management for Server: {{ server_id }}</h1>
+        
+        <h2>Operators</h2>
+        <form action="{{ url_for('add_player', server_id=server_id, list_type='ops') }}" method="POST">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="number" name="level" placeholder="Level (default 4)" min="1" max="4" value="4">
+            <button type="submit">Add Operator</button>
+        </form>
+        <ul>
+            {% for op in ops %}
+                <li>{{ op.name }} (Level: {{ op.level }})</li>
+            {% endfor %}
+        </ul>
+
+        <h2>Whitelist</h2>
+        <form action="{{ url_for('add_player', server_id=server_id, list_type='whitelist') }}" method="POST">
+            <input type="text" name="username" placeholder="Username" required>
+            <button type="submit">Add to Whitelist</button>
+        </form>
+        <ul>
+            {% for player in whitelist %}
+                <li>{{ player.name }}</li>
+            {% endfor %}
+        </ul>
+
+        <h2>Banned Players</h2>
+        <form action="{{ url_for('add_player', server_id=server_id, list_type='banned') }}" method="POST">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="text" name="reason" placeholder="Reason" value="Banned by admin">
+            <button type="submit">Ban Player</button>
+        </form>
+        <ul>
+            {% for banned in banned_players %}
+                <li>{{ banned.name }} (Reason: {{ banned.reason }})</li>
+            {% endfor %}
+        </ul>
+
+        <h2>Banned IPs</h2>
+        <form action="{{ url_for('add_player', server_id=server_id, list_type='banned-ips') }}" method="POST">
+            <input type="text" name="ip" placeholder="IP Address" required>
+            <input type="text" name="reason" placeholder="Reason" value="IP banned by admin">
+            <button type="submit">Ban IP</button>
+        </form>
+        <ul>
+            {% for banned_ip in banned_ips %}
+                <li>{{ banned_ip.ip }} (Reason: {{ banned_ip.reason }})</li>
+            {% endfor %}
+        </ul>
+
+        <a href="{{ url_for('view_server', server_id=server_id) }}">Back to Server View</a>
+    </div>
+</body>
+</html>

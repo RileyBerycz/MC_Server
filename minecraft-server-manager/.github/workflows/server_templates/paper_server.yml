@@ -1,0 +1,27 @@
+name: Deploy Paper Minecraft Server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-paper-server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+
+      - name: Download Paper Server
+        run: |
+          curl -o paper.jar "https://api.papermc.io/v2/projects/paper/versions/latest/builds/latest/downloads/paper-latest.jar"
+
+      - name: Start Paper Server
+        run: |
+          java -Xmx1024M -Xms1024M -jar paper.jar nogui
+        env:
+          EULA: "TRUE"

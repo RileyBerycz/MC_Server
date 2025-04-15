@@ -1,0 +1,43 @@
+name: Deploy Vanilla Minecraft Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_name:
+        description: 'Name of the server'
+        required: true
+      max_players:
+        description: 'Maximum number of players'
+        required: true
+        default: '20'
+      java_args:
+        description: 'Java arguments for server'
+        required: false
+        default: '-Xmx1024M -Xms1024M'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v2
+        with:
+          java-version: '17'
+
+      - name: Create server directory
+        run: mkdir -p server/${{ github.event.inputs.server_name }}
+
+      - name: Copy server files
+        run: |
+          cp server_templates/vanilla/server.properties server/${{ github.event.inputs.server_name }}/server.properties
+
+      - name: Start server
+        run: |
+          cd server/${{ github.event.inputs.server_name }}
+          java ${{ github.event.inputs.java_args }} -jar server.jar nogui
+        env:
+          MAX_PLAYERS: ${{ github.event.inputs.max_players }}

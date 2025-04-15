@@ -1,0 +1,55 @@
+name: Minecraft Admin Panel
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: 'Admin panel timeout in minutes'
+        default: '60'
+        required: false
+      port:
+        description: 'Admin panel port'
+        default: '8080'
+        required: false
+
+jobs:
+  run-admin-panel:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event.inputs.timeout || 60 }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask pyngrok requests werkzeug jinja2 pymdown-extensions markdown
+          
+      - name: Download latest backups
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: minecraft-backup
+          path: .
+          
+      - name: Setup directories
+        run: |
+          mkdir -p admin_panel/static/css
+          mkdir -p uploads
+          mkdir -p server_configs
+          
+      - name: Launch admin panel
+        run: |
+          echo "Starting Minecraft Admin Panel..."
+          python admin_panel.py
+        env:
+          ADMIN_PORT: ${{ github.event.inputs.port || '8080' }}
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY || 'minecraft-default-secret' }}

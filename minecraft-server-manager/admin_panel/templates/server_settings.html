@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Server Settings for {{ server.name }}</h1>
+        <form action="{{ url_for('update_server_settings', server_id=server.id) }}" method="POST">
+            <div class="form-group">
+                <label for="max_players">Max Players:</label>
+                <input type="number" name="max_players" id="max_players" value="{{ server.max_players }}" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label for="difficulty">Difficulty:</label>
+                <select name="difficulty" id="difficulty">
+                    <option value="peaceful" {% if server.difficulty == 'peaceful' %}selected{% endif %}>Peaceful</option>
+                    <option value="easy" {% if server.difficulty == 'easy' %}selected{% endif %}>Easy</option>
+                    <option value="normal" {% if server.difficulty == 'normal' %}selected{% endif %}>Normal</option>
+                    <option value="hard" {% if server.difficulty == 'hard' %}selected{% endif %}>Hard</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="gamemode">Default Game Mode:</label>
+                <select name="gamemode" id="gamemode">
+                    <option value="survival" {% if server.gamemode == 'survival' %}selected{% endif %}>Survival</option>
+                    <option value="creative" {% if server.gamemode == 'creative' %}selected{% endif %}>Creative</option>
+                    <option value="adventure" {% if server.gamemode == 'adventure' %}selected{% endif %}>Adventure</option>
+                    <option value="spectator" {% if server.gamemode == 'spectator' %}selected{% endif %}>Spectator</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="pvp">PVP Enabled:</label>
+                <input type="checkbox" name="pvp" id="pvp" {% if server.pvp %}checked{% endif %}>
+            </div>
+            <div class="form-group">
+                <label for="motd">Message of the Day:</label>
+                <input type="text" name="motd" id="motd" value="{{ server.motd }}" style="width: 100%;">
+            </div>
+            <button type="submit" class="btn">Update Settings</button>
+        </form>
+        <a href="{{ url_for('view_server', server_id=server.id) }}" class="btn">Back to Server View</a>
+    </div>
+</body>
+</html>

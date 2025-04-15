@@ -1,0 +1,41 @@
+name: Forge Minecraft Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_players:
+        description: 'Maximum number of players'
+        default: '20'
+        required: true
+      memory:
+        description: 'Memory allocation for the server (e.g., 2G, 4G)'
+        default: '2G'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v2
+        with:
+          java-version: '17'
+
+      - name: Create server directory
+        run: mkdir -p server
+
+      - name: Download Forge
+        run: |
+          curl -o forge-installer.jar "https://files.minecraftforge.net/maven/net/minecraftforge/forge/latest/forge-1.16.5-36.1.0-installer.jar"
+          java -jar forge-installer.jar --installServer
+
+      - name: Start Forge Server
+        run: |
+          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar forge-1.16.5-36.1.0.jar nogui
+        env:
+          EULA: 'TRUE'
+          MAX_PLAYERS: ${{ github.event.inputs.max_players }}

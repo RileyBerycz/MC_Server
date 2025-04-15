@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Server Admin Panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Minecraft Server Admin Panel</h1>
+            <p>Manage your Minecraft servers easily.</p>
+        </header>
+        
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('create_server') }}">Create Server</a></li>
+                <li><a href="{{ url_for('index') }}">Home</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <h2>Available Servers</h2>
+            <ul>
+                {% for server_id, server in servers.items() %}
+                    <li>
+                        <a href="{{ url_for('view_server', server_id=server_id) }}">{{ server.name }}</a>
+                    </li>
+                {% else %}
+                    <li>No servers available.</li>
+                {% endfor %}
+            </ul>
+        </main>
+
+        <footer>
+            <p>&copy; {{ current_year }} Minecraft Server Admin Panel</p>
+        </footer>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

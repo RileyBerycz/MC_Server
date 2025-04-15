@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Minecraft Server</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Create a New Minecraft Server</h1>
+        <form action="{{ url_for('create_server_submit') }}" method="POST">
+            <div class="form-group">
+                <label for="server_name">Server Name:</label>
+                <input type="text" id="server_name" name="server_name" required>
+            </div>
+            <div class="form-group">
+                <label for="server_type">Server Type:</label>
+                <select id="server_type" name="server_type" required>
+                    <option value="vanilla">Vanilla</option>
+                    <option value="paper">Paper</option>
+                    <option value="forge">Forge</option>
+                    <option value="fabric">Fabric</option>
+                    <option value="bedrock">Bedrock</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="max_players">Max Players:</label>
+                <input type="number" id="max_players" name="max_players" min="1" max="100" required>
+            </div>
+            <div class="form-group">
+                <label for="version">Minecraft Version:</label>
+                <select id="version" name="version" required>
+                    <option value="1.20.6">1.20.6</option>
+                    <option value="1.19.4">1.19.4</option>
+                    <option value="1.18.2">1.18.2</option>
+                    <option value="1.16.5">1.16.5</option>
+                </select>
+            </div>
+            <button type="submit" class="btn">Create Server</button>
+        </form>
+        <a href="{{ url_for('index') }}" class="btn">Back to Dashboard</a>
+    </div>
+</body>
+</html>

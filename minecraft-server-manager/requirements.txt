@@ -1,0 +1,8 @@
+Flask==2.0.1
+pyngrok==0.4.1
+requests==2.25.1
+werkzeug==2.0.1
+jinja2==3.0.1
+pymdown-extensions==8.1
+markdown==3.3.4
+uuid==1.30
