@@ -43,23 +43,33 @@ jobs:
           
       - name: Setup directories
         run: |
-          mkdir -p admin_panel/static/css
-          mkdir -p admin_panel/templates
-          mkdir -p backups
-          mkdir -p server_configs
-          mkdir -p server_templates/{vanilla,paper,forge,fabric,bedrock}
-          # Create directory only if it doesn't exist
-          [ -d "uploads" ] || mkdir -p uploads
+          mkdir -p admin_panel/static/css || true
+          mkdir -p admin_panel/templates || true
+          mkdir -p backups || true
+          mkdir -p server_configs || true
+          mkdir -p server_templates/vanilla || true
+          mkdir -p server_templates/paper || true
+          mkdir -p server_templates/forge || true
+          mkdir -p server_templates/fabric || true
+          mkdir -p server_templates/bedrock || true
+          mkdir -p uploads || true
+          
+      - name: Copy dashboard template
+        run: |
+          # First check if dashboard file exists in either location
+          if [ -f "admin_panel/dashboard" ]; then
+            cp admin_panel/dashboard admin_panel/templates/dashboard.html
+          elif [ -f "admin_panel/dashboard.html" ]; then
+            cp admin_panel/dashboard.html admin_panel/templates/dashboard.html
+          else
+            # Create a basic dashboard if not found
+            echo "<!-- Basic Dashboard Template -->" > admin_panel/templates/dashboard.html
+            echo '<h1>Minecraft Server Admin</h1><p>Setup your server configuration to begin.</p>' >> admin_panel/templates/dashboard.html
+          fi
           
       - name: Launch admin panel
         run: |
           echo "Starting Minecraft Admin Panel..."
-          # Copy dashboard.html to templates directory
-          if [ -f "admin_panel/dashboard" ]; then
-            cp admin_panel/dashboard admin_panel/templates/dashboard.html
-          else
-            echo "Warning: dashboard.html template not found"
-          fi
           
           # Create a basic CSS file if it doesn't exist
           if [ ! -f "admin_panel/static/css/style.css" ]; then
