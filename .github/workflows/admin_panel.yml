@@ -114,51 +114,28 @@ jobs:
       - name: Extract tunnel URLs
         run: |
           sleep 5  # Give tunnels time to establish
-          grep -o 'https://.*\.trycloudflare.com' admin_tunnel.log > tunnel_url.txt || echo "Admin tunnel not found"
-          grep -o 'tcp://.*\.trycloudflare.com' game_tunnel1.log || echo "Game tunnel 1 not found"
-          grep -o 'tcp://.*\.trycloudflare.com' game_tunnel2.log || echo "Game tunnel 2 not found"
+          grep -o 'https://.*\.trycloudflare\.com' admin_tunnel.log > tunnel_url.txt || echo "Admin tunnel not found"
+          grep -o 'tcp://.*\.trycloudflare\.com' game_tunnel1.log > game_tunnel1_url.txt || echo "Game tunnel 1 not found"
+          grep -o 'tcp://.*\.trycloudflare\.com' game_tunnel2.log > game_tunnel2_url.txt || echo "Game tunnel 2 not found"
           
           # Extract the admin panel URL
           ADMIN_URL=$(cat tunnel_url.txt)
+          GAME1_URL=$(cat game_tunnel1_url.txt)
+          GAME2_URL=$(cat game_tunnel2_url.txt)
+          
           if [ ! -z "$ADMIN_URL" ]; then
-            echo "Admin Panel URL: $ADMIN_URL"
-            
-            # Update the README.md file with the URL
-            if [ -f "README.md" ]; then
-              # Create a temporary file with updated content
-              grep -v "ADMIN PANEL URL:" README.md > README.tmp
-              echo "" >> README.tmp
-              echo "## Quick Access" >> README.tmp
-              echo "" >> README.tmp
-              echo "✨ **ADMIN PANEL URL:** $ADMIN_URL ✨" >> README.tmp
-              echo "" >> README.tmp
-              echo "_(This URL is temporary and valid only while the workflow is running)_" >> README.tmp
-              
-              # Replace the original README
-              mv README.tmp README.md
-              
-              # Commit the updated README if we have permissions
-              if [ ! -z "${{ secrets.MY_PAT }}" ]; then
-                git config --global user.name "GitHub Actions"
-                git config --global user.email "actions@github.com"
-                git add README.md
-                git commit -m "Update README with admin panel URL [skip ci]" || echo "No changes to commit"
-                git push
-              fi
-            else
-              echo "## Minecraft Server Admin Panel" > README.md
-              echo "" >> README.md
-              echo "✨ **ADMIN PANEL URL:** $ADMIN_URL ✨" >> README.md
-              
-              # Commit the new README if we have permissions
-              if [ ! -z "${{ secrets.MY_PAT }}" ]; then
-                git config --global user.name "GitHub Actions"
-                git config --global user.email "actions@github.com"
-                git add README.md
-                git commit -m "Create README with admin panel URL [skip ci]" || echo "No changes to commit"
-                git push
-              fi
-            fi
+            echo "✨ ADMIN PANEL URL: $ADMIN_URL ✨"
+            echo "::notice::Admin Panel URL: $ADMIN_URL"
+          fi
+          
+          if [ ! -z "$GAME1_URL" ]; then
+            echo "✨ GAME SERVER 1 URL: $GAME1_URL ✨"
+            echo "::notice::Game Server 1: $GAME1_URL"
+          fi
+          
+          if [ ! -z "$GAME2_URL" ]; then
+            echo "✨ GAME SERVER 2 URL: $GAME2_URL ✨"
+            echo "::notice::Game Server 2: $GAME2_URL"
           fi
 
       - name: Check for shutdown request

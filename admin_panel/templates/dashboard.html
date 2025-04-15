@@ -150,6 +150,11 @@
                         <p><strong>Type:</strong> {{ server.type|capitalize }}</p>
                         <p><strong>Max Players:</strong> {{ server.max_players }}</p>
                         <p><strong>Memory:</strong> {{ server.memory }}</p>
+                        <p>
+                            {% if server.is_active and server.address %}
+                                <strong>Address:</strong> <code>{{ server.address }}</code>
+                            {% endif %}
+                        </p>
                         
                         <div class="server-actions">
                             <a href="{{ url_for('view_server', server_id=server_id) }}" class="btn">Manage</a>

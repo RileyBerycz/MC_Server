@@ -24,6 +24,15 @@
             Status: {% if server.is_active %}Online{% else %}Offline{% endif %}
         </div>
         
+        <!-- Add server address display -->
+        {% if server.is_active and server.address %}
+        <div class="server-address">
+            <h3>Server Address</h3>
+            <p><strong>Connect using:</strong> <code>{{ server.address }}</code></p>
+            <button class="btn" onclick="copyToClipboard('{{ server.address }}')">Copy Address</button>
+        </div>
+        {% endif %}
+        
         <div class="server-actions">
             {% if server.is_active %}
                 <form action="{{ url_for('stop_server', server_id=server_id) }}" method="post">
@@ -64,5 +73,15 @@
         
         <a href="{{ url_for('index') }}">← Back to Server List</a>
     </div>
+    
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                alert("Server address copied to clipboard");
+            }, function() {
+                alert("Failed to copy address");
+            });
+        }
+    </script>
 </body>
 </html>

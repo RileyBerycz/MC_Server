@@ -336,10 +336,19 @@ def index():
     load_server_configs()
     active_workflows = get_active_github_workflows()
     
-    # Update server status based on active workflows
+    # Update server status based on active workflows and server manager
     for server_id, server in servers.items():
-        server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
-        server['status'] = check_server_status(server_id)
+        if server_manager and server_id in server_manager.servers:
+            # Get status from server manager for locally running servers
+            server_status = server_manager.get_server_status(server_id)
+            server['is_active'] = server_status['running']
+            server['address'] = server_status['address']
+            server['online_players'] = server_status.get('online_players', 0)
+        else:
+            # Fall back to GitHub workflow check
+            server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
+            server['status'] = check_server_status(server_id)
+            server['address'] = None
     
     return render_template('dashboard.html', 
                           servers=servers, 
@@ -387,6 +396,7 @@ def create_server():
         if GITHUB_TOKEN:
             try:
                 import subprocess
+                import urllib.parse
                 
                 # Set up Git credentials
                 subprocess.run(['git', 'config', '--global', 'user.name', 'GitHub Actions'])
@@ -398,8 +408,9 @@ def create_server():
                 # Commit the change
                 subprocess.run(['git', 'commit', '-m', f'Add workflow for server {server_name} [skip ci]'])
                 
-                # Push to GitHub using the token
-                push_cmd = f'git push https://{GITHUB_TOKEN}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
+                # Push to GitHub using the token (with proper URL encoding)
+                encoded_token = urllib.parse.quote(GITHUB_TOKEN, safe='')
+                push_cmd = f'git push https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
                 subprocess.run(push_cmd, shell=True)
                 
                 logger.info(f"Successfully pushed workflow file {workflow_path} to GitHub")
@@ -425,8 +436,18 @@ def view_server(server_id):
     
     server = servers[server_id]
     server['status'] = check_server_status(server_id)
-    active_workflows = get_active_github_workflows()
-    server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
+    
+    # Get up-to-date server information from the server manager
+    if server_manager and server_id in server_manager.servers:
+        server_status = server_manager.get_server_status(server_id)
+        server['is_active'] = server_status['running']
+        server['address'] = server_status['address']
+        server['online_players'] = server_status.get('online_players', 0)
+    else:
+        # Fall back to GitHub workflow check
+        active_workflows = get_active_github_workflows()
+        server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
+        server['address'] = None
     
     return render_template('manage_server.html', 
                           server=server,
@@ -442,18 +463,47 @@ def start_server(server_id):
         return redirect(url_for('index'))
     
     server_config = servers[server_id]
-    success = server_manager.start_server(
-        server_id=server_id,
-        server_type=server_config['type'],
-        memory=server_config['memory'],
-        max_players=server_config['max_players'],
-        port=25565  # Would need port management for multiple servers
-    )
     
-    if success:
-        flash('Server started successfully', 'success')
-    else:
-        flash('Failed to start server', 'error')
+    try:
+        # Ensure all required fields exist in the config
+        if 'type' not in server_config:
+            flash('Server type not defined in configuration', 'error')
+            return redirect(url_for('view_server', server_id=server_id))
+        
+        # Get server parameters from configuration
+        server_type = server_config.get('type', 'vanilla')
+        memory = server_config.get('memory', '2G')
+        max_players = server_config.get('max_players', 20)
+        difficulty = server_config.get('difficulty', 'normal')
+        gamemode = server_config.get('gamemode', 'survival')
+        seed = server_config.get('seed', '')
+        
+        # Start the server using server_manager
+        logger.info(f"Attempting to start server {server_id} of type {server_type}")
+        success = server_manager.start_server(
+            server_id=server_id,
+            server_type=server_type,
+            memory=memory,
+            max_players=max_players,
+            port=25565,  # You might want to implement port management
+            difficulty=difficulty,
+            gamemode=gamemode,
+            seed=seed if seed else None
+        )
+        
+        if success:
+            # Update server status in configuration
+            servers[server_id]['is_active'] = True
+            servers[server_id]['last_started'] = time.time()
+            save_server_config(server_id, servers[server_id])
+            
+            flash('Server started successfully', 'success')
+        else:
+            flash('Failed to start server. Check logs for details.', 'error')
+    except Exception as e:
+        logger.error(f"Error starting server {server_id}: {e}")
+        logger.error(traceback.format_exc())
+        flash(f'Error starting server: {str(e)}', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
@@ -554,25 +604,44 @@ def delete_server(server_id):
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
     """Shutdown the admin panel server and the GitHub Action"""
-    flash('Admin panel is shutting down...', 'success')
-    
-    # Create a marker file that signals workflow should end
-    with open("SHUTDOWN_REQUESTED", "w") as f:
-        f.write("shutdown")
-    
-    # Return a response before the server shuts down
-    response = make_response(render_template('shutdown.html'))
-    
-    # Schedule a delayed terminate of the entire process
-    def delayed_shutdown():
-        time.sleep(2)  # Give time for response to be sent
-        os._exit(0)  # Force exit the entire process
+    try:
+        # Make sure to save all server configurations before shutting down
+        global servers
+        logger.info("Saving server configurations before shutting down...")
         
-    thread = threading.Thread(target=delayed_shutdown)
-    thread.daemon = True
-    thread.start()
-    
-    return response
+        # Ensure server_configs directory exists
+        os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
+        
+        # Save each server configuration
+        for server_id, server_config in servers.items():
+            config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+            with open(config_path, 'w') as f:
+                json.dump(server_config, f, indent=2)
+                logger.info(f"Saved configuration for server {server_id}")
+        
+        # Create a marker file that signals workflow should end
+        with open("SHUTDOWN_REQUESTED", "w") as f:
+            f.write("shutdown")
+        
+        flash('Admin panel is shutting down...', 'success')
+        
+        # Return a response before the server shuts down
+        response = make_response(render_template('shutdown.html'))
+        
+        # Schedule a delayed terminate of the entire process
+        def delayed_shutdown():
+            time.sleep(2)  # Give time for response to be sent
+            os._exit(0)  # Force exit the entire process
+            
+        thread = threading.Thread(target=delayed_shutdown)
+        thread.daemon = True
+        thread.start()
+        
+        return response
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+        flash(f'Error during shutdown: {e}', 'error')
+        return redirect(url_for('index'))
 
 def main():
     """Main function to run the admin panel"""

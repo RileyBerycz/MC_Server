@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
             button.addEventListener('click', function(event) {
                 button.disabled = true;
                 button.textContent = 'Starting...';
+                // Don't prevent default to allow form submission
             });
         });
     }
@@ -18,11 +19,32 @@ document.addEventListener('DOMContentLoaded', function() {
             button.addEventListener('click', function(event) {
                 button.disabled = true;
                 button.textContent = 'Stopping...';
+                // Don't prevent default to allow form submission
+            });
+        });
+    }
+
+    // Add event listeners for form submissions
+    const serverForms = document.querySelectorAll('form[action*="server"]');
+    if (serverForms.length > 0) {
+        serverForms.forEach(form => {
+            form.addEventListener('submit', function() {
+                const submitBtn = this.querySelector('button[type="submit"]');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    if (this.action.includes('/start')) {
+                        submitBtn.textContent = 'Starting...';
+                    } else if (this.action.includes('/stop')) {
+                        submitBtn.textContent = 'Stopping...';
+                    } else if (this.action.includes('/delete')) {
+                        submitBtn.textContent = 'Deleting...';
+                    }
+                }
             });
         });
     }
     
-    // Add event listeners for tab functionality
+    // Tab functionality (if used)
     const tabLinks = document.querySelectorAll('.tablinks');
     if (tabLinks.length > 0) {
         tabLinks.forEach(tab => {

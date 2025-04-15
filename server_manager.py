@@ -79,6 +79,15 @@ class ServerManager:
                     'tunnel_process': tunnel_process
                 }
                 
+                # Store address in a format Minecraft clients can use directly
+                if public_url:
+                    # Extract domain without the tcp:// prefix
+                    if public_url.startswith('tcp://'):
+                        address = public_url[6:]  # Remove 'tcp://' prefix
+                    else:
+                        address = public_url
+                    self.servers[server_id]['address'] = address
+                
                 # Set up background threads for status updates and command processing
                 self.start_monitor_threads(server_id)
                 
@@ -309,9 +318,9 @@ class ServerManager:
         if os.path.exists("server.jar"):
             return "server.jar"
         
-        # Download URLs based on server type
+        # Updated download URLs based on server type
         download_urls = {
-            'vanilla': 'https://piston-data.mojang.com/v1/objects/2b95cc780c99ed04682fa1355e1144a4c5aaf214/server.jar',
+            'vanilla': 'https://launcher.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar',
             'paper': 'https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar',
             'forge': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar',
             'fabric': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar',
@@ -328,6 +337,8 @@ class ServerManager:
         
         try:
             response = requests.get(url, stream=True)
+            
+            # Check if the request was successful
             if response.status_code == 200:
                 with open("server.jar", 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
@@ -335,7 +346,7 @@ class ServerManager:
                 logger.info(f"Server JAR downloaded successfully")
                 return "server.jar"
             else:
-                logger.error(f"Failed to download server JAR: {response.status_code}")
+                logger.error(f"Failed to download server JAR: {response.status_code} - {response.reason}")
                 raise Exception(f"Failed to download server JAR: {response.status_code}")
         except Exception as e:
             logger.error(f"Error downloading server JAR: {e}")
