@@ -24,12 +24,32 @@
             Status: {% if server.is_active %}Online{% else %}Offline{% endif %}
         </div>
         
-        <!-- Add server address display -->
-        {% if server.is_active and server.address %}
-        <div class="server-address">
-            <h3>Server Address</h3>
-            <p><strong>Connect using:</strong> <code>{{ server.address }}</code></p>
-            <button class="btn" onclick="copyToClipboard('{{ server.address }}')">Copy Address</button>
+        {% if server.is_active %}
+        <div class="server-address-container">
+            <h2>Server Connection Information</h2>
+            <div class="connection-card">
+                {% if server.address %}
+                    <div class="connection-info">
+                        <h3>Server Address</h3>
+                        <div class="address-box">
+                            <code>{{ server.address }}</code>
+                            <button class="copy-btn" onclick="copyToClipboard('{{ server.address }}')">
+                                Copy
+                            </button>
+                        </div>
+                        <p class="connection-instructions">
+                            <strong>How to connect:</strong> Open Minecraft, click "Multiplayer", 
+                            then "Add Server" and paste this address
+                        </p>
+                    </div>
+                {% else %}
+                    <div class="connection-info">
+                        <p>Server is starting... Connection information will appear here shortly.</p>
+                        <p>It may take 1-2 minutes for the server to fully initialize.</p>
+                        <button class="btn" onclick="location.reload()">Refresh Status</button>
+                    </div>
+                {% endif %}
+            </div>
         </div>
         {% endif %}
         

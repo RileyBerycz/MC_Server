@@ -477,129 +477,114 @@ def start_server(server_id):
     load_server_configs()
     
     if server_id not in servers:
-        logger.error(f"Server {server_id} not found in configurations")
         flash('Server not found', 'error')
         return redirect(url_for('index'))
     
     server_config = servers[server_id]
     server_name = server_config.get('name', 'Unnamed Server')
+    server_type = server_config.get('type', 'vanilla')
     
     try:
-        # Check if should use GitHub Actions (production) or local server_manager (development)
-        use_github_actions = bool(GITHUB_TOKEN and REPO_OWNER and REPO_NAME)
-        github_success = False
-        
-        if use_github_actions:
-            # Prepare workflow inputs
+        # Always prefer GitHub Actions when token is available
+        if GITHUB_TOKEN and REPO_OWNER and REPO_NAME:
+            logger.info(f"Starting server {server_id} using GitHub Actions")
+            
+            # Prepare inputs for the workflow
             inputs = {
+                'server_id': server_id,
+                'server_name': server_name,
+                'server_type': server_type,
                 'memory': server_config.get('memory', '2G'),
+                'max_players': str(server_config.get('max_players', 20)),
+                'difficulty': server_config.get('difficulty', 'normal'),
+                'gamemode': server_config.get('gamemode', 'survival'),
+                'seed': server_config.get('seed', ''),
                 'max_runtime': str(server_config.get('max_runtime', 350)),
                 'backup_interval': str(server_config.get('backup_interval', 6))
             }
             
-            # Check if workflow file exists first
-            workflow_file = f"server_{server_id}.yml"
-            workflow_path = os.path.join(".github", "workflows", workflow_file)
+            # Use the standard template for this server type
+            workflow_name = f"{server_type}_server.yml"
             
-            if not os.path.exists(workflow_path):
-                logger.warning(f"Workflow file {workflow_path} does not exist, creating it")
-                create_workflow_file(server_id, server_name, server_config.get('type', 'vanilla'), 
-                                   server_config.get('memory', '2G'), 
-                                   server_config.get('max_runtime', 350),
-                                   server_config.get('backup_interval', 6))
-                
-                # Try to commit it
-                try:
-                    # Set Git identity first
-                    subprocess.run(['git', 'config', 'user.email', 'minecraft-server-manager@github.actions.com'], check=True)
-                    subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
-                    
-                    subprocess.run(['git', 'add', workflow_path], check=True)
-                    subprocess.run(['git', 'commit', '-m', f"Add workflow for server {server_name} [skip ci]"], check=True)
-                    
-                    import urllib.parse
-                    encoded_token = urllib.parse.quote(GITHUB_TOKEN, safe='')
-                    remote_url = f"https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
-                    subprocess.run(['git', 'push', remote_url], check=True)
-                    
-                    logger.info(f"Created and pushed workflow file for {server_id}")
-                except Exception as e:
-                    logger.error(f"Failed to commit workflow file: {e}")
+            # API endpoint for workflow dispatch
+            api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_name}/dispatches"
             
-            # Now try to dispatch the workflow
-            try:
-                logger.info(f"Starting server {server_id} using GitHub Actions workflow")
-                
-                # The API path needs the workflow file name, not the server ID
-                api_url = f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches"
-                
-                headers = {
-                    'Authorization': f'token {GITHUB_TOKEN}',
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-                
-                data = {
-                    'ref': 'main',  # Use your default branch name here
-                    'inputs': inputs
-                }
-                
-                logger.info(f"Dispatching to URL: {api_url}")
-                response = requests.post(api_url, headers=headers, json=data)
-                
-                if response.status_code == 204:
-                    # Success! Update server status
-                    github_success = True
-                    servers[server_id]['is_active'] = True
-                    servers[server_id]['last_started'] = time.time()
-                    save_server_config(server_id, servers[server_id])
-                    
-                    flash('Server start request sent successfully through GitHub', 'success')
-                else:
-                    logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                    flash(f"Failed to start server via GitHub: {response.status_code}", 'error')
-            except Exception as e:
-                logger.error(f"GitHub workflow dispatch failed: {e}")
-                flash(f"Error dispatching GitHub workflow: {e}", 'error')
-        
-        # If GitHub approach failed or wasn't used, try local server_manager
-        if not github_success:
-            logger.info(f"Starting server {server_id} locally")
+            headers = {
+                'Authorization': f'token {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
             
-            # Get server parameters from configuration
-            server_type = server_config.get('type', 'vanilla')
-            memory = server_config.get('memory', '2G')
-            max_players = server_config.get('max_players', 20)
-            difficulty = server_config.get('difficulty', 'normal')
-            gamemode = server_config.get('gamemode', 'survival')
-            seed = server_config.get('seed', '')
+            data = {
+                'ref': 'main',  # Use main branch
+                'inputs': inputs
+            }
             
-            success = server_manager.start_server(
-                server_id=server_id,
-                server_type=server_type,
-                memory=memory,
-                max_players=max_players,
-                port=25565,
-                difficulty=difficulty,
-                gamemode=gamemode,
-                seed=seed if seed else None
-            )
+            logger.info(f"Dispatching workflow: {workflow_name} with inputs: {inputs}")
+            response = requests.post(api_url, headers=headers, json=data)
             
-            if success:
-                # Update server status in config
+            if response.status_code == 204:
+                # Update server status
                 servers[server_id]['is_active'] = True
                 servers[server_id]['last_started'] = time.time()
+                servers[server_id]['workflow_name'] = workflow_name
                 save_server_config(server_id, servers[server_id])
                 
-                flash('Server started successfully locally', 'success')
+                flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
             else:
-                flash('Failed to start server. Check logs for details.', 'error')
+                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
+                flash(f'Failed to start server in GitHub: {response.status_code}. Trying local server.', 'warning')
                 
+                # Fall back to local server launch
+                local_start(server_id, server_config)
+        else:
+            # No GitHub token, use local server manager
+            local_start(server_id, server_config)
+            
     except Exception as e:
         logger.error(f"Error starting server {server_id}: {e}")
         logger.error(traceback.format_exc())
         flash(f'Error starting server: {str(e)}', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
+
+def local_start(server_id, server_config):
+    """Start server locally using server_manager"""
+    logger.info(f"Starting server {server_id} locally")
+    
+    # Get server parameters
+    server_type = server_config.get('type', 'vanilla')
+    memory = server_config.get('memory', '2G')
+    max_players = server_config.get('max_players', 20)
+    difficulty = server_config.get('difficulty', 'normal')
+    gamemode = server_config.get('gamemode', 'survival')
+    seed = server_config.get('seed', '')
+    
+    success = server_manager.start_server(
+        server_id=server_id,
+        server_type=server_type,
+        memory=memory,
+        max_players=max_players,
+        port=25565,
+        difficulty=difficulty,
+        gamemode=gamemode,
+        seed=seed if seed else None
+    )
+    
+    if success:
+        # Update server status
+        servers[server_id]['is_active'] = True
+        servers[server_id]['last_started'] = time.time()
+        
+        # Get server address from server manager
+        status = server_manager.get_server_status(server_id)
+        if status and 'address' in status:
+            servers[server_id]['address'] = status['address']
+            
+        save_server_config(server_id, servers[server_id])
+        
+        flash('Server started successfully locally', 'success')
+    else:
+        flash('Failed to start server. Check logs for details.', 'error')
 
 @app.route('/server/<server_id>/stop', methods=['POST'])
 def stop_server(server_id):

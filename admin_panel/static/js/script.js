@@ -77,3 +77,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+
+// Add this function for the copy button
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text)
+        .then(() => {
+            // Create a temporary element to show feedback
+            const btn = document.querySelector('.copy-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Copied!';
+            btn.style.backgroundColor = '#2196F3';
+            
+            // Reset after 2 seconds
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.backgroundColor = '';
+            }, 2000);
+        })
+        .catch(err => {
+            console.error('Failed to copy:', err);
+            alert('Failed to copy. Please copy manually.');
+        });
+}

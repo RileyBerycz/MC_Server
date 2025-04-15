@@ -117,3 +117,54 @@ body {
     border-radius: 0 0 5px 5px;
     background-color: white;
 }
+
+.server-address-container {
+    margin: 20px 0;
+}
+
+.connection-card {
+    background-color: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.connection-info {
+    margin-bottom: 15px;
+}
+
+.address-box {
+    display: flex;
+    align-items: center;
+    background-color: #e9e9e9;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.address-box code {
+    flex-grow: 1;
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+}
+
+.copy-btn {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    margin-left: 10px;
+}
+
+.copy-btn:hover {
+    background-color: #45a049;
+}
+
+.connection-instructions {
+    margin-top: 10px;
+    font-size: 14px;
+}
