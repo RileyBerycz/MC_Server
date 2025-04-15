@@ -10,6 +10,7 @@ import requests
 import traceback
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
+from server_manager import ServerManager  # Refactored from Start_Server.py
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -70,6 +71,9 @@ app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 
 # Global variables
 servers = {}  # Store server configurations
+
+# Initialize server manager
+server_manager = ServerManager()
 
 def load_server_configs():
     """Load all server configurations"""
@@ -377,7 +381,33 @@ def create_server():
         save_server_config(server_id, server_config)
         
         # Create workflow file
-        create_workflow_file(server_id, server_name, server_type, memory, max_runtime, backup_interval)
+        workflow_path = create_workflow_file(server_id, server_name, server_type, memory, max_runtime, backup_interval)
+        
+        # Commit and push the workflow file to GitHub
+        if GITHUB_TOKEN:
+            try:
+                import subprocess
+                
+                # Set up Git credentials
+                subprocess.run(['git', 'config', '--global', 'user.name', 'GitHub Actions'])
+                subprocess.run(['git', 'config', '--global', 'user.email', 'actions@github.com'])
+                
+                # Add the workflow file
+                subprocess.run(['git', 'add', workflow_path])
+                
+                # Commit the change
+                subprocess.run(['git', 'commit', '-m', f'Add workflow for server {server_name} [skip ci]'])
+                
+                # Push to GitHub using the token
+                push_cmd = f'git push https://x-access-token:{GITHUB_TOKEN}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
+                subprocess.run(push_cmd, shell=True)
+                
+                logger.info(f"Successfully pushed workflow file {workflow_path} to GitHub")
+            except Exception as e:
+                logger.error(f"Error pushing workflow file to GitHub: {e}")
+                flash(f'Server created, but failed to publish workflow: {e}', 'warning')
+        else:
+            flash('Server created locally, but GitHub token not available to publish workflow', 'warning')
         
         flash(f'Server "{server_name}" created successfully!', 'success')
         return redirect(url_for('index'))
@@ -404,61 +434,26 @@ def view_server(server_id):
 
 @app.route('/server/<server_id>/start', methods=['POST'])
 def start_server(server_id):
-    """Start a Minecraft server"""
+    """Start a Minecraft server directly"""
     load_server_configs()
     
     if server_id not in servers:
         flash('Server not found', 'error')
         return redirect(url_for('index'))
     
-    # Check if server is already running
-    active_workflows = get_active_github_workflows()
-    if any(w['name'] == servers[server_id].get('name', '') for w in active_workflows):
-        flash('Server is already running', 'error')
-        return redirect(url_for('view_server', server_id=server_id))
+    server_config = servers[server_id]
+    success = server_manager.start_server(
+        server_id=server_id,
+        server_type=server_config['type'],
+        memory=server_config['memory'],
+        max_players=server_config['max_players'],
+        port=25565  # Would need port management for multiple servers
+    )
     
-    # Use workflow_dispatch directly instead of repository_dispatch
-    if GITHUB_TOKEN:
-        headers = {
-            'Authorization': f'token {GITHUB_TOKEN}',
-            'Accept': 'application/vnd.github.v3+json'
-        }
-        
-        # Extract server settings
-        server = servers[server_id]
-        
-        # Prepare inputs for workflow_dispatch
-        workflow_inputs = {
-            "memory": server.get('memory', '2G'),
-            "max_runtime": str(server.get('max_runtime', 350)),
-            "backup_interval": str(server.get('backup_interval', 6))
-        }
-        
-        workflow_file = f"server_{server_id}.yml"
-        
-        try:
-            # Trigger workflow_dispatch directly
-            response = requests.post(
-                f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
-                headers=headers,
-                json={
-                    "ref": "main", # or your default branch
-                    "inputs": workflow_inputs
-                }
-            )
-            
-            if response.status_code == 204:
-                flash('Server starting...', 'success')
-                logger.info(f"Successfully started workflow for server {server_id}")
-                return redirect(url_for('view_server', server_id=server_id))
-            else:
-                logger.error(f"Failed to start server: {response.status_code}, {response.text}")
-                flash(f'Failed to start server. Status code: {response.status_code}', 'error')
-        except Exception as e:
-            logger.error(f"Error starting server: {e}")
-            flash(f'Error starting server: {e}', 'error')
+    if success:
+        flash('Server started successfully', 'success')
     else:
-        flash('GitHub token not available, cannot start server', 'error')
+        flash('Failed to start server', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
@@ -566,7 +561,7 @@ def shutdown_server():
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
     """Shutdown the admin panel server and the GitHub Action"""
-    # First stop all running servers to ensure worlds are saved properly
+    # First stop all running servers
     load_server_configs()
     active_workflows = get_active_github_workflows()
     
@@ -590,9 +585,6 @@ def shutdown_server_route():
             except Exception as e:
                 logger.error(f"Error stopping server during shutdown: {e}")
     
-    # Allow time for servers to save and shut down
-    time.sleep(5)
-    
     flash('Admin panel is shutting down...', 'success')
     
     # Create a marker file that signals workflow should end
@@ -601,6 +593,8 @@ def shutdown_server_route():
     
     # Shutdown the Flask server
     threading.Thread(target=lambda: time.sleep(1) and shutdown_server()).start()
+    
+    # Return a response before the server shuts down
     return render_template('shutdown.html')
 
 def main():

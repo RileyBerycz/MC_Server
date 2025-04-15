@@ -170,6 +170,6 @@ jobs:
 
       - name: Start Admin Panel with tmate
         uses: mxschmitt/action-tmate@v3
-        if: ${{ hashFiles('SHUTDOWN_REQUESTED') == '' }}
+        if: ${{ !(success() && hashFiles('SHUTDOWN_REQUESTED') != '') }}
         with:
           limit-access-to-actor: true
