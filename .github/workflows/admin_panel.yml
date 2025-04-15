@@ -15,9 +15,12 @@ on:
 jobs:
   run-admin-panel:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event.inputs.timeout || 60 }}
+    timeout-minutes: 60  # Use a fixed value here
     
     steps:
+      - name: Set timeout
+        run: echo "Using timeout of ${{ github.event.inputs.timeout || 60 }} minutes"
+        
       - name: Checkout repository
         uses: actions/checkout@v4
         
