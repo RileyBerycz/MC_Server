@@ -3,14 +3,13 @@ name: Fabric Minecraft Server
 on:
   workflow_dispatch:
     inputs:
-      server_name:
-        description: 'Name of the server'
-        required: true
       max_players:
         description: 'Maximum number of players'
+        default: '20'
         required: true
       memory:
         description: 'Memory allocation for the server (e.g., 2G, 4G)'
+        default: '2G'
         required: true
 
 jobs:
@@ -19,31 +18,59 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Create server directory
-        run: |
-          mkdir -p server/${{ github.event.inputs.server_name }}
+        run: mkdir -p server
 
-      - name: Download Fabric Installer
+      - name: Install cloudflared
         run: |
-          curl -o fabric-installer.jar https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.11.1/fabric-installer-0.11.1.jar
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
-      - name: Install Fabric Server
+      - name: Download Fabric
         run: |
+          # Download the exact version specified in SERVER_TYPES
+          curl -o fabric-installer.jar "https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar"
+          # Create EULA file
+          echo "eula=true" > eula.txt
+          # Install Fabric server
           java -jar fabric-installer.jar server -downloadMinecraft
+        continue-on-error: false
 
-      - name: Configure server
+      - name: Setup server files
         run: |
-          echo "max-players=${{ github.event.inputs.max_players }}" >> server/${{ github.event.inputs.server_name }}/server.properties
-          echo "memory=${{ github.event.inputs.memory }}" >> server/${{ github.event.inputs.server_name }}/server.properties
+          # Create server.properties if it doesn't exist
+          if [ ! -f "server.properties" ]; then
+            echo "Creating default server.properties"
+            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+            echo "server-port=25565" >> server.properties
+          fi
 
-      - name: Start server
+      - name: Start Cloudflared tunnel
         run: |
-          cd server/${{ github.event.inputs.server_name }}
-          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar fabric-server-launch.jar nogui
+          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
+          echo "Waiting for tunnel to establish..."
+          sleep 10
+          # Extract and display tunnel URL
+          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          cat tunnel.log
+
+      - name: Start Fabric Server
+        run: |
+          # Find the fabric server launcher
+          FABRIC_SERVER_LAUNCHER=$(find . -name "fabric-server-launch.jar" -type f)
+          if [ -z "$FABRIC_SERVER_LAUNCHER" ]; then
+            echo "Error: Fabric server launcher not found!"
+            exit 1
+          fi
+          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar "$FABRIC_SERVER_LAUNCHER" nogui
+        env:
+          EULA: 'TRUE'
+          MAX_PLAYERS: ${{ github.event.inputs.max_players }}

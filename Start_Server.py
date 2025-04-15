@@ -168,6 +168,35 @@ def setup_ngrok(port=25565, auth_token=None):
         logger.error(f"Failed to set up ngrok: {e}")
         raise
 
+def setup_cloudflared_tunnel(port=25565):
+    """Set up and start cloudflared to expose the Minecraft server port."""
+    try:
+        import subprocess
+        import json
+        
+        logger.info(f"Starting cloudflared tunnel for port {port}...")
+        process = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"tcp://localhost:{port}"],
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE
+        )
+        
+        # Wait for tunnel to establish and extract URL
+        time.sleep(5)
+        for line in process.stderr:
+            line = line.decode('utf-8')
+            if "tcp://" in line:
+                url = line.split("tcp://")[1].split()[0]
+                public_url = f"tcp://{url}"
+                logger.info(f"cloudflared tunnel established: {public_url}")
+                return public_url
+                
+        logger.error("Failed to extract cloudflared URL from output")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to set up cloudflared tunnel: {e}")
+        raise
+
 def graceful_shutdown(server_process):
     """Gracefully shut down the server with proper player warnings."""
     if server_process and server_process.poll() is None:

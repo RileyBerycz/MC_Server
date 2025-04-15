@@ -9,7 +9,6 @@ import threading
 import requests
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
-from pyngrok import ngrok, conf
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,35 +26,35 @@ GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 SERVER_TYPES = {
     'vanilla': {
         'name': 'Vanilla',
-        'download_url': 'https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar',
+        'download_url': 'https://piston-data.mojang.com/v1/objects/2b95cc780c99ed04682fa1355e1144a4c5aaf214/server.jar',
         'supports_plugins': False,
         'supports_mods': False,
         'java_args': '-Xmx{memory} -Xms{memory}'
     },
     'paper': {
         'name': 'Paper',
-        'download_url': 'https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/196/downloads/paper-1.20.1-196.jar',
+        'download_url': 'https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar',
         'supports_plugins': True,
         'supports_mods': False,
         'java_args': '-Xmx{memory} -Xms{memory} -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200'
     },
     'forge': {
         'name': 'Forge',
-        'download_url': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.1.0/forge-1.20.1-47.1.0-installer.jar',
+        'download_url': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar',
         'supports_plugins': False,
         'supports_mods': True,
         'java_args': '-Xmx{memory} -Xms{memory} -XX:+UseG1GC'
     },
     'fabric': {
         'name': 'Fabric',
-        'download_url': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.11.2/fabric-installer-0.11.2.jar',
+        'download_url': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar',
         'supports_plugins': False,
         'supports_mods': True,
         'java_args': '-Xmx{memory} -Xms{memory}'
     },
     'bedrock': {
         'name': 'Bedrock',
-        'download_url': 'https://minecraft.azureedge.net/bin-linux/bedrock-server-1.20.0.01.zip',
+        'download_url': 'https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.10.01.zip',
         'supports_plugins': False,
         'supports_mods': False,
         'java_args': ''  # Not using Java
@@ -280,6 +279,32 @@ jobs:
     
     return workflow_path
 
+def setup_cloudflare_tunnel(port):
+    try:
+        import subprocess
+        import json
+        import time
+        
+        # Run cloudflared tunnel
+        process = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE
+        )
+        
+        # Wait for tunnel to establish and extract URL
+        time.sleep(5)
+        for line in process.stderr:
+            line = line.decode('utf-8')
+            if "https://" in line:
+                url = line.split("https://")[1].split()[0]
+                return f"https://{url}"
+                
+        return None
+    except Exception as e:
+        logger.error(f"Error setting up Cloudflare tunnel: {e}")
+        return None
+
 @app.route('/')
 def index():
     """Main page that lists all servers"""
@@ -480,7 +505,6 @@ def main():
     """Main function to run the admin panel"""
     # Get settings from environment
     admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
-    ngrok_auth_token = os.environ.get('NGROK_AUTH_TOKEN')
     
     # Create required directories
     os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
@@ -496,19 +520,13 @@ def main():
     # Load server configurations
     load_server_configs()
     
-    # Set up ngrok for public access
-    if ngrok_auth_token:
-        conf.get_default().auth_token = ngrok_auth_token
-        
-        try:
-            public_url = ngrok.connect(admin_port, "http").public_url
-            logger.info(f"✨ ADMIN PANEL URL: {public_url} ✨")
-            print(f"::notice title=Admin Panel URL::{public_url}")
-        except Exception as e:
-            logger.error(f"Failed to set up ngrok: {e}")
-            logger.info(f"Admin panel available locally at: http://localhost:{admin_port}")
+    # Set up Cloudflare tunnel for public access
+    public_url = setup_cloudflare_tunnel(admin_port)
+    if public_url:
+        logger.info(f"✨ ADMIN PANEL URL: {public_url} ✨")
+        print(f"::notice title=Admin Panel URL::{public_url}")
     else:
-        logger.warning("NGROK_AUTH_TOKEN not set, panel will only be accessible locally")
+        logger.warning("Failed to set up Cloudflare tunnel, panel will only be accessible locally")
         logger.info(f"Admin panel available locally at: http://localhost:{admin_port}")
     
     # Run Flask app

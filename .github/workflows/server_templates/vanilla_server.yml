@@ -1,19 +1,16 @@
-name: Deploy Vanilla Minecraft Server
+name: Vanilla Minecraft Server
 
 on:
   workflow_dispatch:
     inputs:
-      server_name:
-        description: 'Name of the server'
-        required: true
       max_players:
         description: 'Maximum number of players'
-        required: true
         default: '20'
-      java_args:
-        description: 'Java arguments for server'
-        required: false
-        default: '-Xmx1024M -Xms1024M'
+        required: true
+      memory:
+        description: 'Memory allocation for the server (e.g., 2G, 4G)'
+        default: '2G'
+        required: true
 
 jobs:
   deploy:
@@ -21,23 +18,51 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Create server directory
-        run: mkdir -p server/${{ github.event.inputs.server_name }}
+        run: mkdir -p server
 
-      - name: Copy server files
+      - name: Install cloudflared
         run: |
-          cp server_templates/vanilla/server.properties server/${{ github.event.inputs.server_name }}/server.properties
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
-      - name: Start server
+      - name: Download Vanilla Server
         run: |
-          cd server/${{ github.event.inputs.server_name }}
-          java ${{ github.event.inputs.java_args }} -jar server.jar nogui
+          # Download the exact version specified in SERVER_TYPES
+          curl -o server.jar "https://piston-data.mojang.com/v1/objects/2b95cc780c99ed04682fa1355e1144a4c5aaf214/server.jar"
+          # Create EULA file
+          echo "eula=true" > eula.txt
+        continue-on-error: false
+
+      - name: Setup server files
+        run: |
+          # Create server.properties if it doesn't exist
+          if [ ! -f "server.properties" ]; then
+            echo "Creating default server.properties"
+            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+            echo "server-port=25565" >> server.properties
+          fi
+
+      - name: Start Cloudflared tunnel
+        run: |
+          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
+          echo "Waiting for tunnel to establish..."
+          sleep 10
+          # Extract and display tunnel URL
+          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          cat tunnel.log
+
+      - name: Start Vanilla Server
+        run: |
+          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar server.jar nogui
         env:
+          EULA: 'TRUE'
           MAX_PLAYERS: ${{ github.event.inputs.max_players }}

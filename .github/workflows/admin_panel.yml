@@ -67,6 +67,11 @@ jobs:
             echo '<h1>Minecraft Server Admin</h1><p>Setup your server configuration to begin.</p>' >> admin_panel/templates/dashboard.html
           fi
           
+      - name: Install cloudflared
+        run: |
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+
       - name: Launch admin panel
         run: |
           echo "Starting Minecraft Admin Panel..."
@@ -85,3 +90,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY || 'minecraft-default-secret' }}
           ADMIN_TIMEOUT_MINUTES: ${{ github.event.inputs.timeout || '60' }}
+          
+      - name: Start admin panel tunnel
+        run: |
+          cloudflared tunnel --url http://localhost:8080 > admin_tunnel.log 2>&1 &
+          echo "Admin panel tunnel starting..."
+
+      - name: Start game server tunnels (for each server)
+        run: |
+          # For each Minecraft server port (e.g., 25565, 25566)
+          cloudflared tunnel --url tcp://localhost:25565 > game_tunnel1.log 2>&1 &
+          cloudflared tunnel --url tcp://localhost:25566 > game_tunnel2.log 2>&1 &
+          echo "Game server tunnels starting..."
+
+      - name: Extract tunnel URLs
+        run: |
+          sleep 5  # Give tunnels time to establish
+          grep -o 'https://.*\.trycloudflare.com' admin_tunnel.log || echo "Admin tunnel not found"
+          grep -o 'tcp://.*\.trycloudflare.com' game_tunnel1.log || echo "Game tunnel 1 not found"
+          grep -o 'tcp://.*\.trycloudflare.com' game_tunnel2.log || echo "Game tunnel 2 not found"
+
+      - name: Start Admin Panel with tmate
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true

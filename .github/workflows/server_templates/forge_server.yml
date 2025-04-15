@@ -18,24 +18,58 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Create server directory
         run: mkdir -p server
 
+      - name: Install cloudflared
+        run: |
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+
       - name: Download Forge
         run: |
-          curl -o forge-installer.jar "https://files.minecraftforge.net/maven/net/minecraftforge/forge/latest/forge-1.16.5-36.1.0-installer.jar"
+          curl -o forge-installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar"
+          # Create EULA file
+          echo "eula=true" > eula.txt
           java -jar forge-installer.jar --installServer
+        continue-on-error: false
+
+      - name: Setup server files
+        run: |
+          # Create server.properties if it doesn't exist
+          if [ ! -f "server.properties" ]; then
+            echo "Creating default server.properties"
+            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+            echo "server-port=25565" >> server.properties
+          fi
+
+      - name: Start Cloudflared tunnel
+        run: |
+          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
+          echo "Waiting for tunnel to establish..."
+          sleep 10
+          # Extract and display tunnel URL
+          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          cat tunnel.log
 
       - name: Start Forge Server
         run: |
-          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar forge-1.16.5-36.1.0.jar nogui
+          # Use the correct JAR file name that matches the downloaded version
+          FORGE_JAR=$(find . -name "forge-1.21.1-48.0.6*.jar" -type f)
+          if [ -z "$FORGE_JAR" ]; then
+            echo "Error: Forge JAR not found!"
+            exit 1
+          fi
+          echo "Starting Forge server with JAR: $FORGE_JAR"
+          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -XX:+UseG1GC -jar "$FORGE_JAR" nogui
         env:
           EULA: 'TRUE'
           MAX_PLAYERS: ${{ github.event.inputs.max_players }}

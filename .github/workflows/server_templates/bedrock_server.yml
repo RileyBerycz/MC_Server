@@ -1,15 +1,12 @@
-name: Deploy Bedrock Server
+name: Bedrock Minecraft Server
 
 on:
   workflow_dispatch:
     inputs:
-      server_name:
-        description: 'Name of the Bedrock server'
-        required: true
       max_players:
         description: 'Maximum number of players'
+        default: '20'
         required: true
-        default: '10'
 
 jobs:
   deploy:
@@ -17,30 +14,46 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Set up JDK
-        uses: actions/setup-java@v2
-        with:
-          java-version: '17'
+        uses: actions/checkout@v4
 
       - name: Create server directory
-        run: mkdir -p server/${{ github.event.inputs.server_name }}
+        run: mkdir -p server
 
-      - name: Download Bedrock server
+      - name: Install cloudflared
         run: |
-          curl -L -o server/${{ github.event.inputs.server_name }}/bedrock-server.zip https://minecraft.azureedge.net/bin-linux/bedrock-server-latest.zip
-          unzip server/${{ github.event.inputs.server_name }}/bedrock-server.zip -d server/${{ github.event.inputs.server_name }}
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
-      - name: Configure server properties
+      - name: Download Bedrock Server
         run: |
-          echo "max-players=${{ github.event.inputs.max_players }}" > server/${{ github.event.inputs.server_name }}/server.properties
+          # Download the exact version specified in SERVER_TYPES
+          curl -o bedrock-server.zip "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.10.01.zip"
+          unzip bedrock-server.zip -d bedrock-server
+          chmod +x bedrock-server/bedrock_server
+        continue-on-error: false
 
-      - name: Start Bedrock server
+      - name: Setup server properties
         run: |
-          cd server/${{ github.event.inputs.server_name }}
-          nohup ./bedrock_server > server.log 2>&1 &
+          cd bedrock-server
+          if [ -f "server.properties" ]; then
+            sed -i "s/max-players=.*/max-players=${{ github.event.inputs.max_players }}/" server.properties
+          else
+            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+          fi
 
-      - name: Output server information
+      - name: Start Cloudflared tunnel
         run: |
-          echo "Bedrock server '${{ github.event.inputs.server_name }}' is running."
+          cd bedrock-server
+          cloudflared tunnel --url tcp://localhost:19132 > tunnel.log 2>&1 &
+          echo "Waiting for tunnel to establish..."
+          sleep 10
+          # Extract and display tunnel URL
+          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          cat tunnel.log
+
+      - name: Start Bedrock Server
+        run: |
+          cd bedrock-server
+          LD_LIBRARY_PATH=. ./bedrock_server
+        env:
+          MAX_PLAYERS: ${{ github.event.inputs.max_players }}

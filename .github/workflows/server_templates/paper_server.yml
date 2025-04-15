@@ -1,10 +1,19 @@
-name: Deploy Paper Minecraft Server
+name: Paper Minecraft Server
 
 on:
   workflow_dispatch:
+    inputs:
+      max_players:
+        description: 'Maximum number of players'
+        default: '20'
+        required: true
+      memory:
+        description: 'Memory allocation for the server (e.g., 2G, 4G)'
+        default: '2G'
+        required: true
 
 jobs:
-  deploy-paper-server:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -14,14 +23,46 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: '17'
+
+      - name: Create server directory
+        run: mkdir -p server
+
+      - name: Install cloudflared
+        run: |
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
       - name: Download Paper Server
         run: |
-          curl -o paper.jar "https://api.papermc.io/v2/projects/paper/versions/latest/builds/latest/downloads/paper-latest.jar"
+          # Download the exact version specified in SERVER_TYPES
+          curl -o server.jar "https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar"
+          # Create EULA file
+          echo "eula=true" > eula.txt
+        continue-on-error: false
+
+      - name: Setup server files
+        run: |
+          # Create server.properties if it doesn't exist
+          if [ ! -f "server.properties" ]; then
+            echo "Creating default server.properties"
+            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+            echo "server-port=25565" >> server.properties
+          fi
+
+      - name: Start Cloudflared tunnel
+        run: |
+          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
+          echo "Waiting for tunnel to establish..."
+          sleep 10
+          # Extract and display tunnel URL
+          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          cat tunnel.log
 
       - name: Start Paper Server
         run: |
-          java -Xmx1024M -Xms1024M -jar paper.jar nogui
+          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -jar server.jar nogui
         env:
-          EULA: "TRUE"
+          EULA: 'TRUE'
+          MAX_PLAYERS: ${{ github.event.inputs.max_players }}
