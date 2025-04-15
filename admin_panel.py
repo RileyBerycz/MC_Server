@@ -416,13 +416,48 @@ def start_server(server_id):
         flash('Server is already running', 'error')
         return redirect(url_for('view_server', server_id=server_id))
     
-    # Trigger workflow
-    success = send_github_dispatch('minecraft-server-start', {'server_id': server_id})
-    
-    if success:
-        flash('Server start request sent', 'success')
+    # Use workflow_dispatch directly instead of repository_dispatch
+    if GITHUB_TOKEN:
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        # Extract server settings
+        server = servers[server_id]
+        
+        # Prepare inputs for workflow_dispatch
+        workflow_inputs = {
+            "memory": server.get('memory', '2G'),
+            "max_runtime": str(server.get('max_runtime', 350)),
+            "backup_interval": str(server.get('backup_interval', 6))
+        }
+        
+        workflow_file = f"server_{server_id}.yml"
+        
+        try:
+            # Trigger workflow_dispatch directly
+            response = requests.post(
+                f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
+                headers=headers,
+                json={
+                    "ref": "main", # or your default branch
+                    "inputs": workflow_inputs
+                }
+            )
+            
+            if response.status_code == 204:
+                flash('Server starting...', 'success')
+                logger.info(f"Successfully started workflow for server {server_id}")
+                return redirect(url_for('view_server', server_id=server_id))
+            else:
+                logger.error(f"Failed to start server: {response.status_code}, {response.text}")
+                flash(f'Failed to start server. Status code: {response.status_code}', 'error')
+        except Exception as e:
+            logger.error(f"Error starting server: {e}")
+            flash(f'Error starting server: {e}', 'error')
     else:
-        flash('Failed to start server', 'error')
+        flash('GitHub token not available, cannot start server', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
@@ -519,6 +554,20 @@ def delete_server(server_id):
     
     flash('Server deleted successfully', 'success')
     return redirect(url_for('index'))
+
+def shutdown_server():
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        raise RuntimeError('Not running with the Werkzeug Server')
+    func()
+    return 'Server shutting down...'
+
+@app.route('/shutdown', methods=['POST'])
+def shutdown_server_route():
+    """Shutdown the admin panel server"""
+    flash('Admin panel is shutting down...', 'success')
+    threading.Thread(target=lambda: time.sleep(1) and shutdown_server()).start()
+    return render_template('shutdown.html')
 
 def main():
     """Main function to run the admin panel"""

@@ -99,6 +99,23 @@
             background-color: #f8d7da;
             color: #721c24;
         }
+        .quit-button {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #dc3545;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        
+        .quit-button:hover {
+            background-color: #c82333;
+        }
     </style>
 </head>
 <body>
@@ -154,5 +171,9 @@
             <p>No servers configured yet. Create your first server to get started!</p>
         {% endif %}
     </div>
+    
+    <form action="{{ url_for('shutdown_server') }}" method="post" onsubmit="return confirm('Are you sure you want to shut down the admin panel?');">
+        <button type="submit" class="quit-button">Quit Admin Panel</button>
+    </form>
 </body>
 </html>
