@@ -46,7 +46,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyngrok
+          pip install flask pyngrok requests werkzeug
 
       - name: Try to download previous world backup
         uses: actions/download-artifact@v4

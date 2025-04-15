@@ -8,6 +8,8 @@ import datetime
 import threading
 import signal
 import sys
+import json
+from flask import Flask, request, jsonify
 from pyngrok import ngrok, conf
 
 # Set up logging
@@ -16,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_requested = False
+
+# Global variables for command API
+command_queue = []
+app = Flask(__name__)
 
 def create_backup():
     """Create a zip backup of the Minecraft server world."""
@@ -229,6 +235,66 @@ def graceful_shutdown(server_process):
         
         logger.info("Minecraft server stopped")
 
+def setup_command_api():
+    """Set up a simple API for receiving commands."""
+    
+    @app.route('/api/command', methods=['POST'])
+    def receive_command():
+        data = request.json
+        if 'command' in data and 'secret' in data:
+            # Validate secret (should match a configured value)
+            if data['secret'] == os.environ.get('COMMAND_SECRET', 'default-secret'):
+                command_queue.append(data['command'])
+                return jsonify({"status": "success", "message": f"Command queued: {data['command']}"})
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
+    
+    @app.route('/api/status', methods=['GET'])
+    def get_status():
+        # Basic status endpoint
+        return jsonify({
+            "status": "online",
+            "timestamp": time.time()
+        })
+    
+    # Run Flask in a separate thread
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('API_PORT', '8081'))), daemon=True).start()
+
+def process_command_queue(server_process):
+    """Process commands from the queue."""
+    while not shutdown_requested:
+        if command_queue:
+            command = command_queue.pop(0)
+            send_server_command(server_process, command)
+        time.sleep(1)
+
+def update_status_file(server_process, ngrok_url):
+    """Update status file periodically."""
+    global shutdown_requested
+    
+    status_file = 'server_status.json'
+    
+    while not shutdown_requested:
+        try:
+            # Extract host and port from ngrok URL
+            _, host_port = ngrok_url.split("://")
+            host, port = host_port.split(":")
+            
+            status = {
+                "status": "online" if server_process.poll() is None else "offline",
+                "address": f"{host}:{port}",
+                "timestamp": time.time()
+            }
+            
+            # Write status to file
+            with open(status_file, 'w') as f:
+                json.dump(status, f)
+                
+            time.sleep(30)  # Update every 30 seconds
+            
+        except Exception as e:
+            logger.error(f"Failed to update status file: {e}")
+            time.sleep(60)  # Retry after a minute
+
 def main():
     """Main function to launch Minecraft server and expose it via ngrok."""
     global shutdown_requested
@@ -250,11 +316,22 @@ def main():
     shutdown_time = start_time + (max_runtime * 60)
     
     try:
+        # Set up command API
+        setup_command_api()
+        
         # Launch Minecraft server
         server_process = launch_minecraft_server(jar_path, java_args)
         
         # Set up ngrok tunnel
         ngrok_url = setup_ngrok(minecraft_port, ngrok_auth_token)
+        
+        # Start status update thread
+        status_thread = threading.Thread(target=update_status_file, args=(server_process, ngrok_url), daemon=True)
+        status_thread.start()
+        
+        # Start command processing thread
+        command_thread = threading.Thread(target=process_command_queue, args=(server_process,), daemon=True)
+        command_thread.start()
         
         # Schedule first backup
         schedule_backup(server_process, backup_interval)
