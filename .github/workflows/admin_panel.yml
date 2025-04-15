@@ -39,20 +39,39 @@ jobs:
         continue-on-error: true
         with:
           name: minecraft-backup
-          path: .
+          path: ./backups
           
       - name: Setup directories
         run: |
           mkdir -p admin_panel/static/css
-          mkdir -p uploads
+          mkdir -p admin_panel/templates
+          mkdir -p backups
           mkdir -p server_configs
+          mkdir -p server_templates/{vanilla,paper,forge,fabric,bedrock}
+          # Create directory only if it doesn't exist
+          [ -d "uploads" ] || mkdir -p uploads
           
       - name: Launch admin panel
         run: |
           echo "Starting Minecraft Admin Panel..."
+          # Copy dashboard.html to templates directory
+          if [ -f "admin_panel/dashboard" ]; then
+            cp admin_panel/dashboard admin_panel/templates/dashboard.html
+          else
+            echo "Warning: dashboard.html template not found"
+          fi
+          
+          # Create a basic CSS file if it doesn't exist
+          if [ ! -f "admin_panel/static/css/style.css" ]; then
+            echo "/* Minecraft Admin Panel CSS */" > admin_panel/static/css/style.css
+            echo "body { font-family: Arial, sans-serif; }" >> admin_panel/static/css/style.css
+          fi
+          
+          # Run the admin panel (Flask will keep running until terminated)
           python admin_panel.py
         env:
           ADMIN_PORT: ${{ github.event.inputs.port || '8080' }}
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY || 'minecraft-default-secret' }}
+          ADMIN_TIMEOUT_MINUTES: ${{ github.event.inputs.timeout || '60' }}
