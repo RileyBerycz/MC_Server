@@ -305,17 +305,41 @@ class ServerManager:
     
     def prepare_server_jar(self, server_type):
         """Download or prepare the server JAR file based on type"""
-        # This is a simplified version - you would need to implement download logic
-        # based on SERVER_TYPES from admin_panel.py
-        
+        # Check if server jar already exists
         if os.path.exists("server.jar"):
             return "server.jar"
         
-        # In a production implementation, you would download the JAR here
-        # based on the server_type
+        # Download URLs based on server type
+        download_urls = {
+            'vanilla': 'https://piston-data.mojang.com/v1/objects/2b95cc780c99ed04682fa1355e1144a4c5aaf214/server.jar',
+            'paper': 'https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar',
+            'forge': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar',
+            'fabric': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar',
+        }
         
-        logger.warning(f"Server JAR not found for {server_type}")
-        raise FileNotFoundError(f"Server JAR not found for {server_type}")
+        if server_type not in download_urls:
+            logger.warning(f"Unknown server type: {server_type}")
+            raise ValueError(f"Unknown server type: {server_type}")
+        
+        # Download the server JAR
+        import requests
+        url = download_urls[server_type]
+        logger.info(f"Downloading {server_type} server JAR from {url}")
+        
+        try:
+            response = requests.get(url, stream=True)
+            if response.status_code == 200:
+                with open("server.jar", 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logger.info(f"Server JAR downloaded successfully")
+                return "server.jar"
+            else:
+                logger.error(f"Failed to download server JAR: {response.status_code}")
+                raise Exception(f"Failed to download server JAR: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error downloading server JAR: {e}")
+            raise
     
     def get_java_args(self, server_type, memory):
         """Get Java arguments based on server type"""

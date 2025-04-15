@@ -162,14 +162,21 @@ jobs:
           fi
 
       - name: Check for shutdown request
+        id: check_shutdown
         run: |
-          if [ -f "SHUTDOWN_REQUESTED" ]; then
-            echo "Shutdown requested, terminating workflow"
-            exit 0
-          fi
+          while true; do
+            if [ -f "SHUTDOWN_REQUESTED" ]; then
+              echo "::set-output name=shutdown::true"
+              echo "Shutdown requested, terminating workflow"
+              exit 0
+            fi
+            sleep 5
+          done
+        continue-on-error: true
+        timeout-minutes: 60
 
       - name: Start Admin Panel with tmate
         uses: mxschmitt/action-tmate@v3
-        if: ${{ !(success() && hashFiles('SHUTDOWN_REQUESTED') != '') }}
+        if: steps.check_shutdown.outputs.shutdown != 'true'
         with:
           limit-access-to-actor: true

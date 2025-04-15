@@ -8,7 +8,7 @@ import logging
 import threading
 import requests
 import traceback
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
 from server_manager import ServerManager  # Refactored from Start_Server.py
 
@@ -399,7 +399,7 @@ def create_server():
                 subprocess.run(['git', 'commit', '-m', f'Add workflow for server {server_name} [skip ci]'])
                 
                 # Push to GitHub using the token
-                push_cmd = f'git push https://x-access-token:{GITHUB_TOKEN}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
+                push_cmd = f'git push https://{GITHUB_TOKEN}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
                 subprocess.run(push_cmd, shell=True)
                 
                 logger.info(f"Successfully pushed workflow file {workflow_path} to GitHub")
@@ -551,51 +551,28 @@ def delete_server(server_id):
     flash('Server deleted successfully', 'success')
     return redirect(url_for('index'))
 
-def shutdown_server():
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func is None:
-        raise RuntimeError('Not running with the Werkzeug Server')
-    func()
-    return 'Server shutting down...'
-
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
     """Shutdown the admin panel server and the GitHub Action"""
-    # First stop all running servers
-    load_server_configs()
-    active_workflows = get_active_github_workflows()
-    
-    for workflow in active_workflows:
-        if GITHUB_TOKEN:
-            headers = {
-                'Authorization': f'token {GITHUB_TOKEN}',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            try:
-                logger.info(f"Attempting to stop workflow: {workflow['id']}")
-                response = requests.post(
-                    f"{GITHUB_API}/actions/runs/{workflow['id']}/cancel",
-                    headers=headers
-                )
-                if response.status_code == 202:
-                    logger.info(f"Successfully stopped server: {workflow['name']}")
-                else:
-                    logger.warning(f"Failed to stop server: {workflow['name']} (Status: {response.status_code})")
-            except Exception as e:
-                logger.error(f"Error stopping server during shutdown: {e}")
-    
     flash('Admin panel is shutting down...', 'success')
     
     # Create a marker file that signals workflow should end
     with open("SHUTDOWN_REQUESTED", "w") as f:
         f.write("shutdown")
     
-    # Shutdown the Flask server
-    threading.Thread(target=lambda: time.sleep(1) and shutdown_server()).start()
-    
     # Return a response before the server shuts down
-    return render_template('shutdown.html')
+    response = make_response(render_template('shutdown.html'))
+    
+    # Schedule a delayed terminate of the entire process
+    def delayed_shutdown():
+        time.sleep(2)  # Give time for response to be sent
+        os._exit(0)  # Force exit the entire process
+        
+    thread = threading.Thread(target=delayed_shutdown)
+    thread.daemon = True
+    thread.start()
+    
+    return response
 
 def main():
     """Main function to run the admin panel"""
