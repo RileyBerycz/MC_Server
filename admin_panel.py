@@ -565,8 +565,41 @@ def shutdown_server():
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
-    """Shutdown the admin panel server"""
+    """Shutdown the admin panel server and the GitHub Action"""
+    # First stop all running servers to ensure worlds are saved properly
+    load_server_configs()
+    active_workflows = get_active_github_workflows()
+    
+    for workflow in active_workflows:
+        if GITHUB_TOKEN:
+            headers = {
+                'Authorization': f'token {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            try:
+                logger.info(f"Attempting to stop workflow: {workflow['id']}")
+                response = requests.post(
+                    f"{GITHUB_API}/actions/runs/{workflow['id']}/cancel",
+                    headers=headers
+                )
+                if response.status_code == 202:
+                    logger.info(f"Successfully stopped server: {workflow['name']}")
+                else:
+                    logger.warning(f"Failed to stop server: {workflow['name']} (Status: {response.status_code})")
+            except Exception as e:
+                logger.error(f"Error stopping server during shutdown: {e}")
+    
+    # Allow time for servers to save and shut down
+    time.sleep(5)
+    
     flash('Admin panel is shutting down...', 'success')
+    
+    # Create a marker file that signals workflow should end
+    with open("SHUTDOWN_REQUESTED", "w") as f:
+        f.write("shutdown")
+    
+    # Shutdown the Flask server
     threading.Thread(target=lambda: time.sleep(1) and shutdown_server()).start()
     return render_template('shutdown.html')
 
