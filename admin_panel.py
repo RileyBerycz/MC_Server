@@ -455,7 +455,7 @@ def view_server(server_id):
 
 @app.route('/server/<server_id>/start', methods=['POST'])
 def start_server(server_id):
-    """Start a Minecraft server directly"""
+    """Start a Minecraft server"""
     load_server_configs()
     
     if server_id not in servers:
@@ -463,43 +463,82 @@ def start_server(server_id):
         return redirect(url_for('index'))
     
     server_config = servers[server_id]
+    server_name = server_config.get('name', 'Unnamed Server')
     
     try:
-        # Ensure all required fields exist in the config
-        if 'type' not in server_config:
-            flash('Server type not defined in configuration', 'error')
-            return redirect(url_for('view_server', server_id=server_id))
+        # Check if should use GitHub Actions (production) or local server_manager (development)
+        use_github_actions = bool(GITHUB_TOKEN and REPO_OWNER and REPO_NAME)
         
-        # Get server parameters from configuration
-        server_type = server_config.get('type', 'vanilla')
-        memory = server_config.get('memory', '2G')
-        max_players = server_config.get('max_players', 20)
-        difficulty = server_config.get('difficulty', 'normal')
-        gamemode = server_config.get('gamemode', 'survival')
-        seed = server_config.get('seed', '')
-        
-        # Start the server using server_manager
-        logger.info(f"Attempting to start server {server_id} of type {server_type}")
-        success = server_manager.start_server(
-            server_id=server_id,
-            server_type=server_type,
-            memory=memory,
-            max_players=max_players,
-            port=25565,  # You might want to implement port management
-            difficulty=difficulty,
-            gamemode=gamemode,
-            seed=seed if seed else None
-        )
-        
-        if success:
-            # Update server status in configuration
-            servers[server_id]['is_active'] = True
-            servers[server_id]['last_started'] = time.time()
-            save_server_config(server_id, servers[server_id])
+        if use_github_actions:
+            # Trigger the GitHub workflow for this server
+            logger.info(f"Starting server {server_id} using GitHub Actions workflow")
             
-            flash('Server started successfully', 'success')
+            # Prepare workflow inputs
+            inputs = {
+                'memory': server_config.get('memory', '2G'),
+                'max_runtime': str(server_config.get('max_runtime', 350)),
+                'backup_interval': str(server_config.get('backup_interval', 6))
+            }
+            
+            # Trigger workflow dispatch event
+            workflow_file = f"server_{server_id}.yml"
+            headers = {
+                'Authorization': f'token {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            data = {
+                'ref': 'main',  # Use your default branch name here
+                'inputs': inputs
+            }
+            
+            response = requests.post(
+                f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
+                headers=headers,
+                json=data
+            )
+            
+            if response.status_code == 204:
+                # Update server status
+                servers[server_id]['is_active'] = True
+                servers[server_id]['last_started'] = time.time()
+                save_server_config(server_id, servers[server_id])
+                
+                flash('Server start request sent successfully', 'success')
+            else:
+                flash(f'Failed to start server: HTTP {response.status_code}', 'error')
+                logger.error(f"GitHub API error: {response.status_code} - {response.text if hasattr(response, 'text') else 'No response text'}")
         else:
-            flash('Failed to start server. Check logs for details.', 'error')
+            # Fall back to local server_manager for development
+            logger.info(f"Starting server {server_id} locally (no GitHub token available)")
+            
+            # Get server parameters from configuration
+            server_type = server_config.get('type', 'vanilla')
+            memory = server_config.get('memory', '2G')
+            max_players = server_config.get('max_players', 20)
+            difficulty = server_config.get('difficulty', 'normal')
+            gamemode = server_config.get('gamemode', 'survival')
+            seed = server_config.get('seed', '')
+            
+            success = server_manager.start_server(
+                server_id=server_id,
+                server_type=server_type,
+                memory=memory,
+                max_players=max_players,
+                port=25565,
+                difficulty=difficulty,
+                gamemode=gamemode,
+                seed=seed if seed else None
+            )
+            
+            if success:
+                servers[server_id]['is_active'] = True
+                servers[server_id]['last_started'] = time.time()
+                save_server_config(server_id, servers[server_id])
+                
+                flash('Server started successfully', 'success')
+            else:
+                flash('Failed to start server. Check logs for details.', 'error')
     except Exception as e:
         logger.error(f"Error starting server {server_id}: {e}")
         logger.error(traceback.format_exc())
@@ -516,35 +555,52 @@ def stop_server(server_id):
         flash('Server not found', 'error')
         return redirect(url_for('index'))
     
-    # Check if server is running
-    active_workflows = get_active_github_workflows()
-    running_workflow = next((w for w in active_workflows if w['name'] == servers[server_id].get('name', '')), None)
-    
-    if not running_workflow:
-        flash('Server is not running', 'error')
-        return redirect(url_for('view_server', server_id=server_id))
-    
-    # Trigger workflow cancellation
-    if GITHUB_TOKEN:
-        headers = {
-            'Authorization': f'token {GITHUB_TOKEN}',
-            'Accept': 'application/vnd.github.v3+json'
-        }
+    try:
+        # First try to stop via server_manager (local servers)
+        if server_manager and server_id in server_manager.servers:
+            logger.info(f"Stopping server {server_id} using server manager")
+            success = server_manager.stop_server(server_id)
+            
+            if success:
+                # Update server status
+                servers[server_id]['is_active'] = False
+                save_server_config(server_id, servers[server_id])
+                flash('Server stopped successfully', 'success')
+                return redirect(url_for('view_server', server_id=server_id))
         
-        try:
-            response = requests.post(
-                f"{GITHUB_API}/actions/runs/{running_workflow['id']}/cancel",
-                headers=headers
-            )
-            if response.status_code == 202:
-                flash('Server stop request sent', 'success')
-            else:
-                flash(f'Failed to stop server: {response.status_code}', 'error')
-        except Exception as e:
-            logger.error(f"Error stopping server: {e}")
-            flash(f'Error stopping server: {e}', 'error')
-    else:
-        flash('GitHub token not available, cannot stop server', 'error')
+        # Fall back to GitHub workflow check if not managed locally
+        active_workflows = get_active_github_workflows()
+        running_workflow = next((w for w in active_workflows if w['name'] == servers[server_id].get('name', '')), None)
+        
+        if not running_workflow:
+            flash('Server is not running', 'error')
+            return redirect(url_for('view_server', server_id=server_id))
+            
+        # Trigger workflow cancellation
+        if GITHUB_TOKEN:
+            headers = {
+                'Authorization': f'token {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            try:
+                response = requests.post(
+                    f"{GITHUB_API}/actions/runs/{running_workflow['id']}/cancel",
+                    headers=headers
+                )
+                if response.status_code == 202:
+                    flash('Server stop request sent', 'success')
+                else:
+                    flash(f'Failed to stop server: {response.status_code}', 'error')
+            except Exception as e:
+                logger.error(f"Error stopping server: {e}")
+                flash(f'Error stopping server: {e}', 'error')
+        else:
+            flash('GitHub token not available, cannot stop server', 'error')
+    except Exception as e:
+        logger.error(f"Error stopping server {server_id}: {e}")
+        logger.error(traceback.format_exc())
+        flash(f'Error stopping server: {str(e)}', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
@@ -611,6 +667,11 @@ def shutdown_server_route():
         
         # Ensure server_configs directory exists
         os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
+        
+        # Stop all local servers first
+        if server_manager:
+            logger.info("Stopping all running servers...")
+            server_manager.cleanup()
         
         # Save each server configuration
         for server_id, server_config in servers.items():

@@ -7,6 +7,7 @@ import threading
 import signal
 import json
 import zipfile
+import re  # Add this import for regex pattern matching
 from flask import Flask, request, jsonify
 
 # Set up logging
