@@ -419,8 +419,8 @@ def create_server():
         # Commit and push the workflow file to GitHub
         if GITHUB_TOKEN:
             try:
-                # Set Git identity first
-                subprocess.run(['git', 'config', 'user.email', 'minecraft-server-manager@github.actions.com'], check=True)
+                # Set Git identity first - this is the missing step
+                subprocess.run(['git', 'config', 'user.email', 'minecraft-server-manager@github.com'], check=True)
                 subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
                 
                 # Stage the new workflow file
@@ -430,10 +430,12 @@ def create_server():
                 commit_message = f"Add workflow for server {server_name} [skip ci]"
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True)
                 
-                # Push using the token with proper URL encoding
+                # Fix the URL encoding for the token
                 import urllib.parse
                 encoded_token = urllib.parse.quote(GITHUB_TOKEN, safe='')
                 remote_url = f"https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
+                
+                # Push to GitHub
                 subprocess.run(['git', 'push', remote_url], check=True)
                 
                 logger.info(f"Successfully pushed workflow file {workflow_path} to GitHub")
@@ -790,6 +792,57 @@ def upload_server_jar(server_id):
             flash(f'Error uploading JAR: {str(e)}', 'error')
     else:
         flash('Invalid file type. Please upload a .jar file', 'error')
+    
+    return redirect(url_for('view_server', server_id=server_id))
+
+@app.route('/server/<server_id>/download-jar', methods=['POST'])
+def download_server_jar(server_id):
+    """Download a custom server JAR for a server from URL"""
+    if server_id not in servers:
+        flash('Server not found', 'error')
+        return redirect(url_for('index'))
+    
+    # Check if the server is running
+    if server_manager and server_id in server_manager.servers:
+        flash('Cannot change JAR while server is running', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    jar_url = request.form.get('jar_url')
+    if not jar_url:
+        flash('No URL provided', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    try:
+        # Create server directory if it doesn't exist
+        server_dir = os.path.join('server', server_id)
+        os.makedirs(server_dir, exist_ok=True)
+        
+        # Download the JAR file
+        jar_path = os.path.join(server_dir, 'server.jar')
+        
+        # Extract filename from URL or use a default
+        jar_filename = os.path.basename(jar_url.split('?')[0]) or 'custom_server.jar'
+        
+        logger.info(f"Downloading JAR from {jar_url} for server {server_id}")
+        response = requests.get(jar_url, stream=True)
+        
+        if response.status_code != 200:
+            flash(f'Failed to download JAR file: {response.status_code}', 'error')
+            return redirect(url_for('view_server', server_id=server_id))
+        
+        with open(jar_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        # Update server config
+        servers[server_id]['has_custom_jar'] = True
+        servers[server_id]['custom_jar_name'] = jar_filename
+        save_server_config(server_id, servers[server_id])
+        
+        flash(f'Server JAR "{jar_filename}" downloaded successfully', 'success')
+    except Exception as e:
+        logger.error(f"Error downloading JAR for server {server_id}: {e}")
+        flash(f'Error downloading JAR: {str(e)}', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
