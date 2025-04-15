@@ -1,5 +1,27 @@
 // filepath: minecraft-server-manager/minecraft-server-manager/admin_panel/static/js/script.js
 document.addEventListener('DOMContentLoaded', function() {
+    // Server control buttons
+    const startButtons = document.querySelectorAll('.btn-primary[type="submit"]');
+    const stopButtons = document.querySelectorAll('.btn-danger[type="submit"]');
+    
+    if (startButtons.length > 0) {
+        startButtons.forEach(button => {
+            button.addEventListener('click', function(event) {
+                button.disabled = true;
+                button.textContent = 'Starting...';
+            });
+        });
+    }
+    
+    if (stopButtons.length > 0) {
+        stopButtons.forEach(button => {
+            button.addEventListener('click', function(event) {
+                button.disabled = true;
+                button.textContent = 'Stopping...';
+            });
+        });
+    }
+    
     // Add event listeners for tab functionality
     const tabLinks = document.querySelectorAll('.tablinks');
     if (tabLinks.length > 0) {

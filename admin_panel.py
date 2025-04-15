@@ -381,8 +381,7 @@ def create_server():
         flash(f'Server "{server_name}" created successfully!', 'success')
         return redirect(url_for('index'))
     
-    return render_template('create_server.html', 
-                          server_types=SERVER_TYPES)
+    return render_template('create_server.html', server_types=SERVER_TYPES)
 
 @app.route('/server/<server_id>')
 def view_server(server_id):
