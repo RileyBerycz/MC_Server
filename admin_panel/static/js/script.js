@@ -2,11 +2,19 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Add event listeners for tab functionality
     const tabLinks = document.querySelectorAll('.tablinks');
-    tabLinks.forEach(tab => {
-        tab.addEventListener('click', function(event) {
-            openTab(event, this.getAttribute('data-tab'));
+    if (tabLinks.length > 0) {
+        tabLinks.forEach(tab => {
+            tab.addEventListener('click', function(event) {
+                openTab(event, this.getAttribute('data-tab'));
+            });
         });
-    });
+        
+        // Open default tab on page load if it exists
+        const defaultTab = document.getElementById("defaultOpen");
+        if (defaultTab) {
+            defaultTab.click();
+        }
+    }
 
     // Function to open a specific tab
     function openTab(evt, tabName) {
@@ -19,10 +27,9 @@ document.addEventListener('DOMContentLoaded', function() {
         for (i = 0; i < tablinks.length; i++) {
             tablinks[i].className = tablinks[i].className.replace(" active", "");
         }
-        document.getElementById(tabName).style.display = "block";
-        evt.currentTarget.className += " active";
+        if (document.getElementById(tabName)) {
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
     }
-
-    // Open default tab on page load
-    document.getElementById("defaultOpen").click();
 });

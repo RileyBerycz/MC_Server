@@ -56,9 +56,11 @@ jobs:
           
       - name: Copy dashboard template
         run: |
-          # First check if dashboard file exists in either location
-          if [ -f "admin_panel/dashboard" ]; then
-            cp admin_panel/dashboard admin_panel/templates/dashboard.html
+          # First check if dashboard.html already exists in templates folder (and keep it)
+          if [ -f "admin_panel/templates/dashboard.html" ]; then
+            echo "Using existing dashboard.html template"
+          elif [ -f "admin_panel/templates/dashboard" ]; then
+            cp admin_panel/templates/dashboard admin_panel/templates/dashboard.html
           elif [ -f "admin_panel/dashboard.html" ]; then
             cp admin_panel/dashboard.html admin_panel/templates/dashboard.html
           else
