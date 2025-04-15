@@ -88,7 +88,13 @@ def load_server_configs():
                     server_id = filename[:-5]  # Remove .json extension
                     with open(os.path.join(SERVER_CONFIGS_DIR, filename), 'r') as f:
                         config = json.load(f)
+                        # Validate required fields are present
+                        if 'name' not in config:
+                            config['name'] = f"Server {server_id[:6]}"
+                        if 'type' not in config:
+                            config['type'] = 'vanilla'
                         servers[server_id] = config
+                        logger.info(f"Loaded server config for {config['name']} ({server_id})")
                 except Exception as e:
                     logger.error(f"Error loading server config {filename}: {e}")
     
@@ -98,8 +104,16 @@ def save_server_config(server_id, config):
     """Save a server configuration to file"""
     os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
     
+    # Ensure the configuration is complete
+    if 'name' not in config:
+        config['name'] = f"Server {server_id[:6]}"
+    if 'created_at' not in config:
+        config['created_at'] = time.time()
+    
+    # Save the configuration
     with open(os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"), 'w') as f:
         json.dump(config, f, indent=2)
+        logger.info(f"Saved configuration for server {server_id}")
 
 def check_server_status(server_id):
     """Check the status of a specific server"""
@@ -384,11 +398,15 @@ def create_server():
             'max_runtime': max_runtime,
             'backup_interval': backup_interval,
             'created_at': time.time(),
-            'has_custom_files': False
+            'has_custom_files': False,
+            'is_active': False  # Explicitly set to inactive
         }
         
-        # Save server config
+        # Save server config FIRST, before any workflow creation
         save_server_config(server_id, server_config)
+        
+        # Update global servers dictionary immediately
+        servers[server_id] = server_config
         
         # Create workflow file
         workflow_path = create_workflow_file(server_id, server_name, server_type, memory, max_runtime, backup_interval)
@@ -396,6 +414,10 @@ def create_server():
         # Commit and push the workflow file to GitHub
         if GITHUB_TOKEN:
             try:
+                # Set Git identity first
+                subprocess.run(['git', 'config', 'user.email', 'minecraft-server-manager@github.actions.com'], check=True)
+                subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
+                
                 # Stage the new workflow file
                 subprocess.run(['git', 'add', workflow_path], check=True)
                 
@@ -455,6 +477,7 @@ def start_server(server_id):
     load_server_configs()
     
     if server_id not in servers:
+        logger.error(f"Server {server_id} not found in configurations")
         flash('Server not found', 'error')
         return redirect(url_for('index'))
     
@@ -467,9 +490,6 @@ def start_server(server_id):
         github_success = False
         
         if use_github_actions:
-            # Try the GitHub workflow approach first
-            logger.info(f"Starting server {server_id} using GitHub Actions workflow")
-            
             # Prepare workflow inputs
             inputs = {
                 'memory': server_config.get('memory', '2G'),
@@ -477,9 +497,42 @@ def start_server(server_id):
                 'backup_interval': str(server_config.get('backup_interval', 6))
             }
             
+            # Check if workflow file exists first
+            workflow_file = f"server_{server_id}.yml"
+            workflow_path = os.path.join(".github", "workflows", workflow_file)
+            
+            if not os.path.exists(workflow_path):
+                logger.warning(f"Workflow file {workflow_path} does not exist, creating it")
+                create_workflow_file(server_id, server_name, server_config.get('type', 'vanilla'), 
+                                   server_config.get('memory', '2G'), 
+                                   server_config.get('max_runtime', 350),
+                                   server_config.get('backup_interval', 6))
+                
+                # Try to commit it
+                try:
+                    # Set Git identity first
+                    subprocess.run(['git', 'config', 'user.email', 'minecraft-server-manager@github.actions.com'], check=True)
+                    subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
+                    
+                    subprocess.run(['git', 'add', workflow_path], check=True)
+                    subprocess.run(['git', 'commit', '-m', f"Add workflow for server {server_name} [skip ci]"], check=True)
+                    
+                    import urllib.parse
+                    encoded_token = urllib.parse.quote(GITHUB_TOKEN, safe='')
+                    remote_url = f"https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
+                    subprocess.run(['git', 'push', remote_url], check=True)
+                    
+                    logger.info(f"Created and pushed workflow file for {server_id}")
+                except Exception as e:
+                    logger.error(f"Failed to commit workflow file: {e}")
+            
+            # Now try to dispatch the workflow
             try:
-                # Trigger workflow dispatch event
-                workflow_file = f"server_{server_id}.yml"
+                logger.info(f"Starting server {server_id} using GitHub Actions workflow")
+                
+                # The API path needs the workflow file name, not the server ID
+                api_url = f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches"
+                
                 headers = {
                     'Authorization': f'token {GITHUB_TOKEN}',
                     'Accept': 'application/vnd.github.v3+json'
@@ -490,14 +543,11 @@ def start_server(server_id):
                     'inputs': inputs
                 }
                 
-                response = requests.post(
-                    f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
-                    headers=headers,
-                    json=data
-                )
+                logger.info(f"Dispatching to URL: {api_url}")
+                response = requests.post(api_url, headers=headers, json=data)
                 
                 if response.status_code == 204:
-                    # Update server status
+                    # Success! Update server status
                     github_success = True
                     servers[server_id]['is_active'] = True
                     servers[server_id]['last_started'] = time.time()
@@ -505,10 +555,11 @@ def start_server(server_id):
                     
                     flash('Server start request sent successfully through GitHub', 'success')
                 else:
-                    logger.error(f"GitHub API error: {response.status_code} - {response.text if hasattr(response, 'text') else 'No response text'}")
+                    logger.error(f"GitHub API error: {response.status_code} - {response.text}")
+                    flash(f"Failed to start server via GitHub: {response.status_code}", 'error')
             except Exception as e:
                 logger.error(f"GitHub workflow dispatch failed: {e}")
-                # Will fall back to local server launch
+                flash(f"Error dispatching GitHub workflow: {e}", 'error')
         
         # If GitHub approach failed or wasn't used, try local server_manager
         if not github_success:
@@ -534,6 +585,7 @@ def start_server(server_id):
             )
             
             if success:
+                # Update server status in config
                 servers[server_id]['is_active'] = True
                 servers[server_id]['last_started'] = time.time()
                 save_server_config(server_id, servers[server_id])
@@ -727,9 +779,12 @@ def shutdown_server_route():
         # Save each server configuration
         for server_id, server_config in servers.items():
             config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
-            with open(config_path, 'w') as f:
-                json.dump(server_config, f, indent=2)
-                logger.info(f"Saved configuration for server {server_id}")
+            try:
+                with open(config_path, 'w') as f:
+                    json.dump(server_config, f, indent=2)
+                    logger.info(f"Saved configuration for server {server_id}")
+            except Exception as e:
+                logger.error(f"Error saving server config {server_id}: {e}")
         
         # Create a marker file that signals workflow should end
         with open("SHUTDOWN_REQUESTED", "w") as f:
