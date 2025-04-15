@@ -7,6 +7,7 @@ import uuid
 import logging
 import threading
 import requests
+import traceback
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 
@@ -573,6 +574,11 @@ def main():
     """Main function to run the admin panel"""
     # Get settings from environment
     admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
+    
+    # Debug output
+    print("GITHUB_TOKEN present:", bool(GITHUB_TOKEN))
+    print("REPO_OWNER:", REPO_OWNER)
+    print("REPO_NAME:", REPO_NAME)
     
     # Create required directories
     os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)

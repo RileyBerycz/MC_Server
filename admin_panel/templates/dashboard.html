@@ -172,7 +172,7 @@
         {% endif %}
     </div>
     
-    <form action="{{ url_for('shutdown_server') }}" method="post" onsubmit="return confirm('Are you sure you want to shut down the admin panel?');">
+    <form action="{{ url_for('shutdown_server_route') }}" method="post" onsubmit="return confirm('Are you sure you want to shut down the admin panel?');">
         <button type="submit" class="quit-button">Quit Admin Panel</button>
     </form>
 </body>
