@@ -60,6 +60,20 @@
                 <p><strong>Memory:</strong> {{ server.memory }}</p>
             </div>
             
+            {% if server.type == 'forge' or server.type == 'fabric' %}
+            <div class="card">
+                <h3>Upload Custom Server JAR</h3>
+                <p>For modded servers, you can upload a custom server JAR file.</p>
+                {% if server.has_custom_jar %}
+                  <p>Current JAR: <strong>{{ server.custom_jar_name }}</strong></p>
+                {% endif %}
+                <form action="{{ url_for('upload_server_jar', server_id=server_id) }}" method="POST" enctype="multipart/form-data">
+                  <input type="file" name="jar_file" accept=".jar" required>
+                  <button type="submit" class="btn">Upload JAR</button>
+                </form>
+            </div>
+            {% endif %}
+            
             {% if server.is_active %}
                 <div class="card">
                     <h3>Send Command</h3>

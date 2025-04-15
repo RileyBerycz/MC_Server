@@ -8,9 +8,10 @@ import logging
 import threading
 import requests
 import traceback
+import subprocess
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
-from server_manager import ServerManager  # Refactored from Start_Server.py
+from server_manager import ServerManager  
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -395,23 +396,18 @@ def create_server():
         # Commit and push the workflow file to GitHub
         if GITHUB_TOKEN:
             try:
-                import subprocess
+                # Stage the new workflow file
+                subprocess.run(['git', 'add', workflow_path], check=True)
+                
+                # Commit the workflow file
+                commit_message = f"Add workflow for server {server_name} [skip ci]"
+                subprocess.run(['git', 'commit', '-m', commit_message], check=True)
+                
+                # Push using the token with proper URL encoding
                 import urllib.parse
-                
-                # Set up Git credentials
-                subprocess.run(['git', 'config', '--global', 'user.name', 'GitHub Actions'])
-                subprocess.run(['git', 'config', '--global', 'user.email', 'actions@github.com'])
-                
-                # Add the workflow file
-                subprocess.run(['git', 'add', workflow_path])
-                
-                # Commit the change
-                subprocess.run(['git', 'commit', '-m', f'Add workflow for server {server_name} [skip ci]'])
-                
-                # Push to GitHub using the token (with proper URL encoding)
                 encoded_token = urllib.parse.quote(GITHUB_TOKEN, safe='')
-                push_cmd = f'git push https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git'
-                subprocess.run(push_cmd, shell=True)
+                remote_url = f"https://{encoded_token}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
+                subprocess.run(['git', 'push', remote_url], check=True)
                 
                 logger.info(f"Successfully pushed workflow file {workflow_path} to GitHub")
             except Exception as e:
@@ -468,9 +464,10 @@ def start_server(server_id):
     try:
         # Check if should use GitHub Actions (production) or local server_manager (development)
         use_github_actions = bool(GITHUB_TOKEN and REPO_OWNER and REPO_NAME)
+        github_success = False
         
         if use_github_actions:
-            # Trigger the GitHub workflow for this server
+            # Try the GitHub workflow approach first
             logger.info(f"Starting server {server_id} using GitHub Actions workflow")
             
             # Prepare workflow inputs
@@ -480,37 +477,42 @@ def start_server(server_id):
                 'backup_interval': str(server_config.get('backup_interval', 6))
             }
             
-            # Trigger workflow dispatch event
-            workflow_file = f"server_{server_id}.yml"
-            headers = {
-                'Authorization': f'token {GITHUB_TOKEN}',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            data = {
-                'ref': 'main',  # Use your default branch name here
-                'inputs': inputs
-            }
-            
-            response = requests.post(
-                f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
-                headers=headers,
-                json=data
-            )
-            
-            if response.status_code == 204:
-                # Update server status
-                servers[server_id]['is_active'] = True
-                servers[server_id]['last_started'] = time.time()
-                save_server_config(server_id, servers[server_id])
+            try:
+                # Trigger workflow dispatch event
+                workflow_file = f"server_{server_id}.yml"
+                headers = {
+                    'Authorization': f'token {GITHUB_TOKEN}',
+                    'Accept': 'application/vnd.github.v3+json'
+                }
                 
-                flash('Server start request sent successfully', 'success')
-            else:
-                flash(f'Failed to start server: HTTP {response.status_code}', 'error')
-                logger.error(f"GitHub API error: {response.status_code} - {response.text if hasattr(response, 'text') else 'No response text'}")
-        else:
-            # Fall back to local server_manager for development
-            logger.info(f"Starting server {server_id} locally (no GitHub token available)")
+                data = {
+                    'ref': 'main',  # Use your default branch name here
+                    'inputs': inputs
+                }
+                
+                response = requests.post(
+                    f"{GITHUB_API}/actions/workflows/{workflow_file}/dispatches",
+                    headers=headers,
+                    json=data
+                )
+                
+                if response.status_code == 204:
+                    # Update server status
+                    github_success = True
+                    servers[server_id]['is_active'] = True
+                    servers[server_id]['last_started'] = time.time()
+                    save_server_config(server_id, servers[server_id])
+                    
+                    flash('Server start request sent successfully through GitHub', 'success')
+                else:
+                    logger.error(f"GitHub API error: {response.status_code} - {response.text if hasattr(response, 'text') else 'No response text'}")
+            except Exception as e:
+                logger.error(f"GitHub workflow dispatch failed: {e}")
+                # Will fall back to local server launch
+        
+        # If GitHub approach failed or wasn't used, try local server_manager
+        if not github_success:
+            logger.info(f"Starting server {server_id} locally")
             
             # Get server parameters from configuration
             server_type = server_config.get('type', 'vanilla')
@@ -536,9 +538,10 @@ def start_server(server_id):
                 servers[server_id]['last_started'] = time.time()
                 save_server_config(server_id, servers[server_id])
                 
-                flash('Server started successfully', 'success')
+                flash('Server started successfully locally', 'success')
             else:
                 flash('Failed to start server. Check logs for details.', 'error')
+                
     except Exception as e:
         logger.error(f"Error starting server {server_id}: {e}")
         logger.error(traceback.format_exc())
@@ -656,6 +659,54 @@ def delete_server(server_id):
     
     flash('Server deleted successfully', 'success')
     return redirect(url_for('index'))
+
+@app.route('/server/<server_id>/upload-jar', methods=['POST'])
+def upload_server_jar(server_id):
+    """Upload a custom server JAR for a server"""
+    if server_id not in servers:
+        flash('Server not found', 'error')
+        return redirect(url_for('index'))
+    
+    # Check if the server is running
+    if server_manager and server_id in server_manager.servers:
+        flash('Cannot upload JAR while server is running', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    # Check if the post request has the file part
+    if 'jar_file' not in request.files:
+        flash('No file part', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    jar_file = request.files['jar_file']
+    
+    # If user does not select file, browser also submit empty part without filename
+    if jar_file.filename == '':
+        flash('No selected file', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    if jar_file and jar_file.filename.endswith('.jar'):
+        try:
+            # Create server directory if it doesn't exist
+            server_dir = os.path.join('server', server_id)
+            os.makedirs(server_dir, exist_ok=True)
+            
+            # Save the JAR file
+            jar_path = os.path.join(server_dir, 'server.jar')
+            jar_file.save(jar_path)
+            
+            # Update server config
+            servers[server_id]['has_custom_jar'] = True
+            servers[server_id]['custom_jar_name'] = jar_file.filename
+            save_server_config(server_id, servers[server_id])
+            
+            flash(f'Server JAR "{jar_file.filename}" uploaded successfully', 'success')
+        except Exception as e:
+            logger.error(f"Error uploading JAR for server {server_id}: {e}")
+            flash(f'Error uploading JAR: {str(e)}', 'error')
+    else:
+        flash('Invalid file type. Please upload a .jar file', 'error')
+    
+    return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():

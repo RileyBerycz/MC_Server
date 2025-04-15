@@ -319,39 +319,201 @@ class ServerManager:
         if os.path.exists("server.jar"):
             return "server.jar"
         
-        # Updated download URLs based on server type
-        download_urls = {
-            'vanilla': 'https://launcher.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar',
-            'paper': 'https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar',
-            'forge': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar',
-            'fabric': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar',
-        }
-        
-        if server_type not in download_urls:
-            logger.warning(f"Unknown server type: {server_type}")
-            raise ValueError(f"Unknown server type: {server_type}")
-        
-        # Download the server JAR
+        # Initialize requests if not already imported
         import requests
-        url = download_urls[server_type]
-        logger.info(f"Downloading {server_type} server JAR from {url}")
         
         try:
-            response = requests.get(url, stream=True)
-            
-            # Check if the request was successful
-            if response.status_code == 200:
-                with open("server.jar", 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                logger.info(f"Server JAR downloaded successfully")
-                return "server.jar"
+            if server_type == 'vanilla':
+                return self.download_vanilla_server()
+            elif server_type == 'paper':
+                return self.download_paper_server()
+            elif server_type == 'fabric':
+                return self.setup_fabric_server()
+            elif server_type == 'forge':
+                return self.setup_forge_server()
+            elif server_type == 'bedrock':
+                return self.setup_bedrock_server()
             else:
-                logger.error(f"Failed to download server JAR: {response.status_code} - {response.reason}")
-                raise Exception(f"Failed to download server JAR: {response.status_code}")
+                logger.warning(f"Unknown server type: {server_type}")
+                raise ValueError(f"Unknown server type: {server_type}")
         except Exception as e:
-            logger.error(f"Error downloading server JAR: {e}")
+            logger.error(f"Error preparing server JAR: {e}")
             raise
+
+    def download_vanilla_server(self):
+        """Download the vanilla Minecraft server"""
+        # Vanilla server is simpler - direct download
+        url = "https://launcher.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
+        logger.info(f"Downloading vanilla server from {url}")
+        
+        import requests
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open("server.jar", 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            logger.info("Vanilla server JAR downloaded successfully")
+            return "server.jar"
+        else:
+            logger.error(f"Failed to download vanilla server: {response.status_code}")
+            raise Exception(f"Failed to download vanilla server: {response.status_code}")
+
+    def download_paper_server(self):
+        """Download the latest Paper server"""
+        import requests
+        import json
+        
+        # First get the latest Paper version
+        paper_api = "https://api.papermc.io/v2/projects/paper"
+        logger.info(f"Getting latest Paper version from {paper_api}")
+        
+        try:
+            response = requests.get(paper_api)
+            if response.status_code != 200:
+                raise Exception(f"Failed to get Paper versions: {response.status_code}")
+            
+            data = response.json()
+            latest_version = data['versions'][-1]  # Get the latest version
+            
+            # Now get the latest build for this version
+            builds_url = f"{paper_api}/versions/{latest_version}"
+            response = requests.get(builds_url)
+            if response.status_code != 200:
+                raise Exception(f"Failed to get Paper builds: {response.status_code}")
+            
+            builds_data = response.json()
+            latest_build = builds_data['builds'][-1]  # Get the latest build
+            
+            # Now download the JAR
+            download_url = f"{paper_api}/versions/{latest_version}/builds/{latest_build}/downloads/paper-{latest_version}-{latest_build}.jar"
+            logger.info(f"Downloading Paper server from {download_url}")
+            
+            response = requests.get(download_url, stream=True)
+            if response.status_code != 200:
+                raise Exception(f"Failed to download Paper server: {response.status_code}")
+            
+            with open("server.jar", 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    
+            logger.info("Paper server JAR downloaded successfully")
+            return "server.jar"
+        except Exception as e:
+            logger.error(f"Error downloading Paper server: {e}")
+            raise
+
+    def setup_fabric_server(self):
+        """Download and set up Fabric server"""
+        import requests
+        import subprocess
+        
+        # Download Fabric installer
+        fabric_installer_url = "https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.11.2/fabric-installer-0.11.2.jar"
+        logger.info(f"Downloading Fabric installer from {fabric_installer_url}")
+        
+        response = requests.get(fabric_installer_url, stream=True)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download Fabric installer: {response.status_code}")
+        
+        with open("fabric-installer.jar", 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        # Run Fabric installer
+        logger.info("Running Fabric installer")
+        result = subprocess.run(
+            ["java", "-jar", "fabric-installer.jar", "server", "-mcversion", "1.20.4", "-downloadMinecraft"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if result.returncode != 0:
+            error_output = result.stderr.decode('utf-8')
+            logger.error(f"Fabric installer failed: {error_output}")
+            raise Exception(f"Fabric installer failed: {error_output}")
+        
+        logger.info("Fabric server setup successfully")
+        
+        # Find the fabric server jar
+        fabric_jars = [f for f in os.listdir('.') if f.startswith('fabric-server-launch.jar')]
+        if fabric_jars:
+            # Create a symlink/copy to server.jar for consistency
+            os.symlink(fabric_jars[0], "server.jar")
+            return "server.jar"
+        else:
+            raise Exception("Fabric server JAR not found after installation")
+
+    def setup_forge_server(self):
+        """Set up Forge server (needs manual intervention)"""
+        import requests
+        import subprocess
+        
+        # For Forge, we'll download the installer first
+        forge_installer_url = "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.4-49.0.9/forge-1.20.4-49.0.9-installer.jar"
+        logger.info(f"Downloading Forge installer from {forge_installer_url}")
+        
+        response = requests.get(forge_installer_url, stream=True)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download Forge installer: {response.status_code}")
+        
+        with open("forge-installer.jar", 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        # Run Forge installer
+        logger.info("Running Forge installer")
+        result = subprocess.run(
+            ["java", "-jar", "forge-installer.jar", "--installServer"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if result.returncode != 0:
+            error_output = result.stderr.decode('utf-8')
+            logger.error(f"Forge installer failed: {error_output}")
+            raise Exception(f"Forge installer failed: {error_output}")
+        
+        logger.info("Forge server setup successfully")
+        
+        # Find the forge server jar
+        forge_jars = [f for f in os.listdir('.') if f.startswith('forge-') and f.endswith('.jar') and 'installer' not in f]
+        if forge_jars:
+            # Create symlink/copy to server.jar for consistency
+            os.symlink(forge_jars[0], "server.jar")
+            return "server.jar"
+        else:
+            # Create a run script instead that will be used
+            with open("start.sh", 'w') as f:
+                f.write("#!/bin/bash\n")
+                f.write("java -Xmx${MEMORY:-2G} -Xms${MEMORY:-2G} @user_jvm_args.txt @libraries/net/minecraftforge/forge/*/unix_args.txt \"$@\"\n")
+            os.chmod("start.sh", 0o755)
+            return "start.sh"
+
+    def setup_bedrock_server(self):
+        """Download and set up Bedrock server"""
+        import requests
+        import zipfile
+        import io
+        
+        # Bedrock server comes as a zip
+        bedrock_url = "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.20.61.02.zip"
+        logger.info(f"Downloading Bedrock server from {bedrock_url}")
+        
+        response = requests.get(bedrock_url, stream=True)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download Bedrock server: {response.status_code}")
+        
+        # Extract the zip
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+            zip_ref.extractall(".")
+        
+        # Set execute permissions on bedrock_server
+        if os.path.exists("bedrock_server"):
+            os.chmod("bedrock_server", 0o755)
+            logger.info("Bedrock server setup successfully")
+            return "bedrock_server"
+        else:
+            raise Exception("Bedrock server executable not found after extraction")
     
     def get_java_args(self, server_type, memory):
         """Get Java arguments based on server type"""
