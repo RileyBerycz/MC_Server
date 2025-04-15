@@ -484,7 +484,12 @@ def main():
     
     # Create required directories
     os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
+    
+    # Check if uploads exists as a file and handle it
+    if os.path.exists(UPLOADS_DIR) and not os.path.isdir(UPLOADS_DIR):
+        os.remove(UPLOADS_DIR)  # Remove if it's a file
     os.makedirs(UPLOADS_DIR, exist_ok=True)
+    
     os.makedirs("admin_panel/templates", exist_ok=True)
     os.makedirs("admin_panel/static/css", exist_ok=True)
     
