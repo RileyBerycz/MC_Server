@@ -9,33 +9,56 @@
 <body>
     <div class="container">
         <h1>Create a New Minecraft Server</h1>
-        <form action="{{ url_for('create_server_submit') }}" method="POST">
+        <form action="{{ url_for('create_server') }}" method="POST">
             <div class="form-group">
                 <label for="server_name">Server Name:</label>
-                <input type="text" id="server_name" name="server_name" required>
+                <input type="text" id="server_name" name="server_name" value="My Minecraft Server" required>
             </div>
             <div class="form-group">
                 <label for="server_type">Server Type:</label>
                 <select id="server_type" name="server_type" required>
-                    <option value="vanilla">Vanilla</option>
-                    <option value="paper">Paper</option>
-                    <option value="forge">Forge</option>
-                    <option value="fabric">Fabric</option>
-                    <option value="bedrock">Bedrock</option>
+                    {% for type_key, type_info in server_types.items() %}
+                        <option value="{{ type_key }}">{{ type_info.name }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="form-group">
                 <label for="max_players">Max Players:</label>
-                <input type="number" id="max_players" name="max_players" min="1" max="100" required>
+                <input type="number" id="max_players" name="max_players" value="20" min="1" max="100" required>
             </div>
             <div class="form-group">
-                <label for="version">Minecraft Version:</label>
-                <select id="version" name="version" required>
-                    <option value="1.20.6">1.20.6</option>
-                    <option value="1.19.4">1.19.4</option>
-                    <option value="1.18.2">1.18.2</option>
-                    <option value="1.16.5">1.16.5</option>
+                <label for="difficulty">Difficulty:</label>
+                <select id="difficulty" name="difficulty">
+                    <option value="peaceful">Peaceful</option>
+                    <option value="easy">Easy</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="hard">Hard</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label for="gamemode">Game Mode:</label>
+                <select id="gamemode" name="gamemode">
+                    <option value="survival" selected>Survival</option>
+                    <option value="creative">Creative</option>
+                    <option value="adventure">Adventure</option>
+                    <option value="spectator">Spectator</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="seed">Seed (Optional):</label>
+                <input type="text" id="seed" name="seed">
+            </div>
+            <div class="form-group">
+                <label for="memory">Memory (e.g. 2G, 1024M):</label>
+                <input type="text" id="memory" name="memory" placeholder="Auto">
+            </div>
+            <div class="form-group">
+                <label for="max_runtime">Max Runtime (minutes):</label>
+                <input type="number" id="max_runtime" name="max_runtime" value="350" min="15" max="360" required>
+            </div>
+            <div class="form-group">
+                <label for="backup_interval">Backup Interval (hours):</label>
+                <input type="number" id="backup_interval" name="backup_interval" value="6" min="1" max="24" step="0.5" required>
             </div>
             <button type="submit" class="btn">Create Server</button>
         </form>
