@@ -284,8 +284,9 @@ def setup_cloudflare_tunnel(port):
         import subprocess
         import json
         import time
+        import re
         
-        # Run cloudflared tunnel
+        logger.info(f"Starting cloudflared tunnel for port {port}...")
         process = subprocess.Popen(
             ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
             stdout=subprocess.PIPE, 
@@ -294,12 +295,31 @@ def setup_cloudflare_tunnel(port):
         
         # Wait for tunnel to establish and extract URL
         time.sleep(5)
-        for line in process.stderr:
-            line = line.decode('utf-8')
-            if "https://" in line:
-                url = line.split("https://")[1].split()[0]
-                return f"https://{url}"
+        
+        # Collect output for 10 seconds to ensure we capture the URL
+        output = ""
+        end_time = time.time() + 10
+        while time.time() < end_time:
+            if process.stderr.peek():
+                line = process.stderr.readline().decode('utf-8')
+                output += line
+                # Look for the typical tunnel URL pattern
+                match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+                if match:
+                    tunnel_url = match.group(0)
+                    logger.info(f"Found tunnel URL: {tunnel_url}")
+                    return tunnel_url
+            time.sleep(0.1)
+            
+        # If not found in realtime, search the collected output
+        match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', output)
+        if match:
+            tunnel_url = match.group(0)
+            logger.info(f"Found tunnel URL in collected output: {tunnel_url}")
+            return tunnel_url
                 
+        logger.error("Could not find valid tunnel URL in cloudflared output")
+        logger.debug(f"Cloudflared output: {output}")
         return None
     except Exception as e:
         logger.error(f"Error setting up Cloudflare tunnel: {e}")

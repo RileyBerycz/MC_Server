@@ -96,6 +96,12 @@ jobs:
           cloudflared tunnel --url http://localhost:8080 > admin_tunnel.log 2>&1 &
           echo "Admin panel tunnel starting..."
 
+      - name: Debug Cloudflared output
+        run: |
+          cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          sleep 10
+          cat tunnel.log
+
       - name: Start game server tunnels (for each server)
         run: |
           # For each Minecraft server port (e.g., 25565, 25566)
