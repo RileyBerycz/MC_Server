@@ -123,7 +123,8 @@ def save_server_config(server_id, config):
         logger.error(traceback.format_exc())
 
 def check_server_status(server_id):
-    status_path = f"server/{server_id}/status.json"
+    # Change status_path to check in servers/ directory instead of server/
+    status_path = f"servers/{server_id}/status.json"
     try:
         if os.path.exists(status_path):
             with open(status_path, 'r') as f:
@@ -413,22 +414,22 @@ def index():
 
 @app.route('/create-server', methods=['GET', 'POST'])
 def create_server():
-    """Create a new server configuration"""
+    """Create a new server configuration with a random ID"""
     if request.method == 'POST':
-        server_name = request.form.get('server_name', 'Minecraft Server')
-        server_type = request.form.get('server_type', 'vanilla')
+        server_name = request.form['server_name']
+        server_type = request.form['server_type']
         max_players = int(request.form.get('max_players', 20))
         difficulty = request.form.get('difficulty', 'normal')
         gamemode = request.form.get('gamemode', 'survival')
         seed = request.form.get('seed', '')
-        memory = request.form.get('memory', '') or calculate_memory(max_players)
+        memory = request.form.get('memory', '')
         max_runtime = int(request.form.get('max_runtime', 350))
-        backup_interval = float(request.form.get('backup_interval', 6))
+        backup_interval = float(request.form.get('backup_interval', 6.0))
         
-        # Generate unique ID for server
-        server_id = str(uuid.uuid4())[:8]
+        # Generate a random ID for this server
+        server_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID for shorter ID
         
-        # Create server config
+        # Create server configuration
         server_config = {
             'name': server_name,
             'type': server_type,
@@ -436,38 +437,30 @@ def create_server():
             'difficulty': difficulty,
             'gamemode': gamemode,
             'seed': seed,
-            'memory': memory,
-            'max_runtime': max_runtime,
-            'backup_interval': backup_interval,
+            'memory': memory if memory else calculate_memory(max_players),
+            'is_active': False,
             'created_at': time.time(),
-            'is_active': False
+            'last_started': 0,
+            'max_runtime': max_runtime,
+            'backup_interval': backup_interval
         }
         
-        # Save the server configuration
+        # Save the configuration with the random ID
         save_server_config(server_id, server_config)
         servers[server_id] = server_config
-
-        # --- Ensure server folder is created and committed ---
-        server_dir = os.path.join("server", server_id)
+        
+        # Create server directory if it doesn't exist
+        server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
+        
+        # Optionally, create a README in the server directory
         readme_path = os.path.join(server_dir, "README.md")
-        with open(readme_path, 'w') as f:
+        with open(readme_path, "w") as f:
             f.write(f"# {server_name}\n\nServer ID: {server_id}\nType: {server_type}\nCreated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-        try:
-            subprocess.run(['git', 'config', 'user.email', 'minecraft-server@github.com'], check=True)
-            subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
-            subprocess.run(['git', 'add', server_dir], check=True)
-            subprocess.run(['git', 'commit', '-m', f"Create server directory for {server_name} [skip ci]"], check=True)
-            subprocess.run(['git', 'push'], check=True)
-            logger.info(f"Successfully created and pushed server directory {server_dir}")
-            flash(f'Server "{server_name}" created successfully!', 'success')
-        except Exception as e:
-            logger.error(f"Error pushing server directory to GitHub: {e}")
-            flash(f'Server created, but failed to publish directory: {e}', 'warning')
-
+        
+        flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
         return redirect(url_for('index'))
-    
+        
     return render_template('create_server.html', server_types=SERVER_TYPES)
 
 @app.route('/server/<server_id>')
@@ -504,7 +497,7 @@ def start_server(server_id):
     load_server_configs()
     
     if server_id not in servers:
-        flash('Server not found', 'error')
+        flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
     
     server_config = servers[server_id]
@@ -512,58 +505,21 @@ def start_server(server_id):
     server_name = server_config.get('name', 'Unnamed Server')
     
     try:
-        logger.info(f"Starting server {server_id} using GitHub Actions")
-        
-        # First, ensure the workflow file exists in the correct location
-        source_path = os.path.join(".github", "workflows", "server_templates", f"{server_type}_server.yml")
-        target_path = os.path.join(".github", "workflows", f"{server_type}_server.yml")
-        
-        if os.path.exists(source_path) and not os.path.exists(target_path):
-            # Copy the workflow template to the correct location
-            shutil.copy(source_path, target_path)
-            logger.info(f"Copied workflow template from {source_path} to {target_path}")
-            
-            # Try to commit the new workflow file
-            try:
-                # Set Git identity
-                subprocess.run(['git', 'config', 'user.email', 'minecraft-server@github.com'], check=True)
-                subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
-                
-                # Add and commit
-                subprocess.run(['git', 'add', target_path], check=True)
-                subprocess.run(['git', 'commit', '-m', f"Add {server_type} workflow for GitHub Actions [skip ci]"], check=True)
-                
-                # Push (without token in URL for security)
-                subprocess.run(['git', 'push'], check=True)
-                
-                logger.info(f"Successfully committed and pushed workflow file {target_path}")
-            except Exception as e:
-                logger.warning(f"Could not commit workflow file: {e}")
-                # Continue anyway - the file exists locally now
-        elif not os.path.exists(target_path):
-            flash(f'Workflow template for {server_type} not found', 'error')
-            return redirect(url_for('view_server', server_id=server_id))
-        
-        # Debug list workflows before dispatching
-        debug_list_workflows()
-        
-        # Now use the correct workflow path that the GitHub API expects
+        # Get appropriate workflow file for the server type
         workflow_file = f"{server_type}_server.yml"
         
-        # Use the GitHub API to dispatch the workflow
         headers = {
-            'Authorization': f"Bearer {GITHUB_TOKEN}",  # Changed to Bearer token format
-            'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28'  # Added API version
+            'Authorization': f"Bearer {GITHUB_TOKEN}",
+            'Accept': 'application/vnd.github+json'
         }
         
-        # Prepare inputs for the workflow
+        # Build inputs for the workflow
         inputs = {
             'server_id': server_id
         }
         
         data = {
-            'ref': 'admin_panel',  # <-- Use your working branch here!
+            'ref': 'admin_panel',
             'inputs': inputs
         }
         
