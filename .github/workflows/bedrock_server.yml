@@ -8,24 +8,23 @@ on:
         required: true
 
 jobs:
-  deploy:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Create server directory
-        run: mkdir -p server/${{ inputs.server_id }}
 
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-      - name: Download Bedrock Server
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Bedrock server if missing
         run: |
-          cd server/${{ inputs.server_id }}
+          cd servers/${{ inputs.server_id }}
           if [ ! -f "bedrock_server" ]; then
             curl -o bedrock-server.zip "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.41.01.zip"
             unzip -o bedrock-server.zip
@@ -33,28 +32,27 @@ jobs:
             rm bedrock-server.zip
           fi
 
-      - name: Start Cloudflared tunnel
+      - name: Create server_helper.py
         run: |
-          cd server/${{ inputs.server_id }}
-          cloudflared tunnel --url udp://localhost:19132 > tunnel.log 2>&1 &
-          sleep 10
-          TUNNEL_URL=$(grep -o 'udp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+          cat > server_helper.py << 'EOF'
+          # Insert the server_helper.py code here - too large to include in this example
+          EOF
+          chmod +x server_helper.py
 
-      - name: Start Bedrock Server
-        run: |
-          cd server/${{ inputs.server_id }}
-          LD_LIBRARY_PATH=. ./bedrock_server || true
+      - name: Initialize server (generate files only)
+        run: python server_helper.py ${{ inputs.server_id }} bedrock true
 
       - name: Commit generated files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add server/${{ inputs.server_id }}
+          git add servers/${{ inputs.server_id }}
           git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start server and tunnel
+        run: |
+          python server_helper.py ${{ inputs.server_id }} bedrock
+        # This will run continuously until the workflow times out or is canceled

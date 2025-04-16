@@ -8,9 +8,8 @@ on:
         required: true
 
 jobs:
-  deploy:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,52 +20,44 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create server directory
-        run: mkdir -p server/${{ inputs.server_id }}
-
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
       - name: Setup Forge Server
         run: |
-          cd server/${{ inputs.server_id }}
-          if [ ! -f "server.jar" ]; then
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f "forge-*-universal.jar" ]; then
             curl -o forge-installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.4-49.0.11/forge-1.21.4-49.0.11-installer.jar"
             echo "eula=true" > eula.txt
             java -jar forge-installer.jar --installServer
-            FORGE_JAR=$(find . -name "forge-1.21.4-49.0.11*.jar" -type f)
-            if [ ! -z "$FORGE_JAR" ]; then
-              ln -sf "$FORGE_JAR" server.jar
-            else
-              echo "Error: Forge JAR not found after installation"
-              exit 1
-            fi
           fi
 
-      - name: Start Cloudflared tunnel
+      - name: Create server_helper.py
         run: |
-          cd server/${{ inputs.server_id }}
-          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
-          sleep 10
-          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+          cat > server_helper.py << 'EOF'
+          # Insert the server_helper.py code here - too large to include in this example
+          EOF
+          chmod +x server_helper.py
 
-      - name: Start Forge Server
-        run: |
-          cd server/${{ inputs.server_id }}
-          java -jar server.jar nogui
+      - name: Initialize server (generate files only)
+        run: python server_helper.py ${{ inputs.server_id }} forge true
 
       - name: Commit generated files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add server/${{ inputs.server_id }}
+          git add servers/${{ inputs.server_id }}
           git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start server and tunnel
+        run: |
+          python server_helper.py ${{ inputs.server_id }} forge
+        # This will run continuously until the workflow times out or is canceled

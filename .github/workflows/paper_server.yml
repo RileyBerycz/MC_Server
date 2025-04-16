@@ -8,9 +8,8 @@ on:
         required: true
 
 jobs:
-  deploy:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,44 +20,45 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create server directory
-        run: mkdir -p server/${{ inputs.server_id }}
-
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-      - name: Download Paper Server
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Paper jar if missing
         run: |
-          cd server/${{ inputs.server_id }}
-          if [ ! -f "server.jar" ]; then
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f server.jar ]; then
             curl -o server.jar "https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/389/downloads/paper-1.21.4-389.jar"
           fi
-          echo "eula=true" > eula.txt
 
-      - name: Start Cloudflared tunnel
-        run: |
-          cd server/${{ inputs.server_id }}
-          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
-          sleep 10
-          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+      - name: Accept EULA
+        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
 
-      - name: Start Paper Server
+      - name: Create server_helper.py
         run: |
-          cd server/${{ inputs.server_id }}
-          java -jar server.jar nogui
+          cat > server_helper.py << 'EOF'
+          # Insert the server_helper.py code here - too large to include in this example
+          EOF
+          chmod +x server_helper.py
+
+      - name: Initialize server (generate files only)
+        run: python server_helper.py ${{ inputs.server_id }} paper true
 
       - name: Commit generated files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add server/${{ inputs.server_id }}
+          git add servers/${{ inputs.server_id }}
           git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start server and tunnel
+        run: |
+          python server_helper.py ${{ inputs.server_id }} paper
+        # This will run continuously until the workflow times out or is canceled

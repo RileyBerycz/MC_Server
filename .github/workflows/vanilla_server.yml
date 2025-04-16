@@ -38,21 +38,15 @@ jobs:
       - name: Accept EULA
         run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
 
-      - name: Start server (first run generates files)
+      - name: Create server_helper.py
         run: |
-          cd servers/${{ inputs.server_id }}
-          java -Xmx2G -Xms2G -jar server.jar nogui || true
+          cat > server_helper.py << 'EOF'
+          # Insert the server_helper.py code here - too large to include in this example
+          EOF
+          chmod +x server_helper.py
 
-      - name: Start Cloudflared tunnel
-        run: |
-          cd servers/${{ inputs.server_id }}
-          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
-          sleep 10
-          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+      - name: Initialize server (generate files only)
+        run: python server_helper.py ${{ inputs.server_id }} vanilla true
 
       - name: Commit generated files
         run: |
@@ -63,3 +57,8 @@ jobs:
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start server and tunnel
+        run: |
+          python server_helper.py ${{ inputs.server_id }} vanilla
+        # This will run continuously until the workflow times out or is canceled

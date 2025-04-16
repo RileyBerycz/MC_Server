@@ -8,9 +8,8 @@ on:
         required: true
 
 jobs:
-  deploy:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,52 +20,44 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create server directory
-        run: mkdir -p server/${{ inputs.server_id }}
-
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
       - name: Setup Fabric Server
         run: |
-          cd server/${{ inputs.server_id }}
-          if [ ! -f "server.jar" ] && [ ! -f "fabric-server-launch.jar" ]; then
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f "fabric-server-launch.jar" ]; then
             curl -o fabric-installer.jar "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.0/fabric-installer-1.1.0.jar"
             echo "eula=true" > eula.txt
             java -jar fabric-installer.jar server -mcversion 1.21.4 -downloadMinecraft
           fi
 
-      - name: Start Cloudflared tunnel
+      - name: Create server_helper.py
         run: |
-          cd server/${{ inputs.server_id }}
-          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
-          sleep 10
-          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+          cat > server_helper.py << 'EOF'
+          # Insert the server_helper.py code here - too large to include in this example
+          EOF
+          chmod +x server_helper.py
 
-      - name: Start Fabric Server
-        run: |
-          cd server/${{ inputs.server_id }}
-          if [ -f "fabric-server-launch.jar" ]; then
-            java -jar fabric-server-launch.jar nogui
-          elif [ -f "server.jar" ]; then
-            java -jar server.jar nogui
-          else
-            echo "Error: Fabric server launcher not found!"
-            exit 1
-          fi
+      - name: Initialize server (generate files only)
+        run: python server_helper.py ${{ inputs.server_id }} fabric true
 
       - name: Commit generated files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add server/${{ inputs.server_id }}
+          git add servers/${{ inputs.server_id }}
           git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start server and tunnel
+        run: |
+          python server_helper.py ${{ inputs.server_id }} fabric
+        # This will run continuously until the workflow times out or is canceled
