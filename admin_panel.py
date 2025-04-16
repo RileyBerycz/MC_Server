@@ -371,6 +371,26 @@ def setup_cloudflare_tunnel(port):
         logger.error(f"Error setting up Cloudflare tunnel: {e}")
         return None
 
+def debug_list_workflows():
+    """List all workflows on the admin_panel branch and log their names and paths."""
+    if not GITHUB_TOKEN:
+        logger.error("No GitHub token provided for workflow debug.")
+        return
+
+    headers = {
+        'Authorization': f"Bearer {GITHUB_TOKEN}",
+        'Accept': 'application/vnd.github+json'
+    }
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows?ref=admin_panel"
+    logger.info(f"DEBUG: Listing workflows with URL: {url}")
+    response = requests.get(url, headers=headers)
+    logger.info(f"DEBUG: List workflows status: {response.status_code}")
+    try:
+        data = response.json()
+        logger.info(f"DEBUG: Workflows response: {json.dumps(data, indent=2)}")
+    except Exception as e:
+        logger.error(f"DEBUG: Could not decode workflows response: {e}")
+
 @app.route('/')
 def index():
     """Main page that lists all servers"""
@@ -535,6 +555,9 @@ def start_server(server_id):
         elif not os.path.exists(target_path):
             flash(f'Workflow template for {server_type} not found', 'error')
             return redirect(url_for('view_server', server_id=server_id))
+        
+        # Debug list workflows before dispatching
+        debug_list_workflows()
         
         # Now use the correct workflow path that the GitHub API expects
         workflow_file = f"{server_type}_server.yml"
