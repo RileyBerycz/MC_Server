@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# server_helper.py
+# filepath: c:\Projects\MinecraftServer\MC_Server\server_helper.py
 
 import os
 import subprocess
@@ -10,6 +10,10 @@ import sys
 import signal
 import threading
 
+# Ensure unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 def start_server(server_id, server_type, initialize_only=False):
     """
     Start a Minecraft server of the specified type
@@ -17,7 +21,16 @@ def start_server(server_id, server_type, initialize_only=False):
     """
     print(f"Starting {server_type} server for {server_id}")
     server_dir = f"servers/{server_id}"
+    
+    # Make sure the directory exists
+    os.makedirs(server_dir, exist_ok=True)
     os.chdir(server_dir)
+    
+    # Create EULA file before starting the server
+    with open("eula.txt", "w") as f:
+        f.write("eula=true\n")
+        
+    print(f"Created eula.txt with eula=true in {server_dir}")
     
     # Define commands for different server types
     if server_type == "vanilla":
@@ -38,13 +51,14 @@ def start_server(server_id, server_type, initialize_only=False):
         else:
             cmd = ["java", "-Xmx2G", "-Xms2G", "-jar", "server.jar", "nogui"]
     elif server_type == "bedrock":
-        cmd = ["LD_LIBRARY_PATH=. ./bedrock_server"]
+        cmd = "LD_LIBRARY_PATH=. ./bedrock_server"
     else:
         print(f"Unknown server type: {server_type}")
         return False
     
     # Create server.properties with defaults if it doesn't exist
     if not os.path.exists("server.properties"):
+        print(f"Creating default server.properties in {server_dir}")
         with open("server.properties", "w") as f:
             f.write("enable-jmx-monitoring=false\n")
             f.write("rcon.port=25575\n")
@@ -98,14 +112,28 @@ def start_server(server_id, server_type, initialize_only=False):
             f.write("resource-pack-sha1=\n")
             f.write("max-world-size=29999984\n")
     
+    print(f"Executing command: {cmd}")
+    
     # Create a pipe for the subprocess to allow reading output
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1
-    )
+    if server_type == "bedrock":
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            shell=True,
+            bufsize=1
+        )
+    else:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
+    
+    print(f"Server process started with PID: {process.pid}")
     
     # Track if the server has finished initializing
     initialized = False
@@ -113,14 +141,18 @@ def start_server(server_id, server_type, initialize_only=False):
     # Set up a thread to read the output
     def read_output():
         nonlocal initialized
-        for line in process.stdout:
-            print(line, end='')
-            if "Done" in line and "For help, type" in line:
-                initialized = True
-                if initialize_only:
-                    print("Server initialized, shutting down for files generation")
-                    process.terminate()
-                    break
+        try:
+            for line in iter(process.stdout.readline, ''):
+                print(f"SERVER OUTPUT: {line.strip()}")
+                if "Done" in line and "For help, type" in line:
+                    print("Server initialization completed!")
+                    initialized = True
+                    if initialize_only:
+                        print("Server initialized, shutting down for files generation")
+                        process.terminate()
+                        break
+        except Exception as e:
+            print(f"Error reading server output: {e}")
     
     output_thread = threading.Thread(target=read_output)
     output_thread.daemon = True
@@ -129,20 +161,28 @@ def start_server(server_id, server_type, initialize_only=False):
     # Wait for server to initialize or timeout
     timeout = 300  # 5 minutes
     start_time = time.time()
+    print(f"Waiting for server initialization (timeout: {timeout} seconds)...")
+    
     while not initialized and time.time() - start_time < timeout:
         time.sleep(1)
         # Check if process has ended
         if process.poll() is not None:
-            print("Server process ended prematurely")
+            print(f"Server process ended prematurely with code: {process.returncode}")
             return False
+    
+    if not initialized:
+        print(f"Server initialization timed out after {timeout} seconds")
     
     # If we're just initializing, wait for process to fully end
     if initialize_only:
+        print("Waiting for server to shut down...")
         output_thread.join(timeout=30)
         process.wait(timeout=30)
+        print("Server shutdown complete")
         return True
     
     # Otherwise return the process
+    print("Server fully initialized and running")
     return process
 
 def setup_cloudflared_tunnel():
