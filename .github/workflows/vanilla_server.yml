@@ -41,12 +41,12 @@ jobs:
       - name: Create server_helper.py
         run: |
           cat > server_helper.py << 'EOF'
-          # Insert the server_helper.py code here - too large to include in this example
+          # Insert the server_helper.py code here
           EOF
           chmod +x server_helper.py
 
       - name: Initialize server (generate files only)
-        run: python server_helper.py ${{ inputs.server_id }} vanilla true
+        run: python3 -u server_helper.py ${{ inputs.server_id }} vanilla true
 
       - name: Commit generated files
         run: |
@@ -60,5 +60,5 @@ jobs:
 
       - name: Start server and tunnel
         run: |
-          python server_helper.py ${{ inputs.server_id }} vanilla
+          python3 -u server_helper.py ${{ inputs.server_id }} vanilla
         # This will run continuously until the workflow times out or is canceled

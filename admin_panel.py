@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
+# filepath: c:\Projects\MinecraftServer\MC_Server\admin_panel.py
 import os
 import sys
-import json
 import time
+import json
 import uuid
 import logging
-import threading
-import requests
-import traceback
+import re
 import subprocess
+import traceback
 import datetime
-import shutil
+import requests
+import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
-from server_manager import ServerManager  
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,35 +31,35 @@ GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 SERVER_TYPES = {
     'vanilla': {
         'name': 'Vanilla',
-        'download_url': 'https://piston-data.mojang.com/v1/objects/2b95cc780c99ed04682fa1355e1144a4c5aaf214/server.jar',
+        'download_url': 'https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar',
         'supports_plugins': False,
         'supports_mods': False,
         'java_args': '-Xmx{memory} -Xms{memory}'
     },
     'paper': {
         'name': 'Paper',
-        'download_url': 'https://api.papermc.io/v2/projects/paper/versions/1.21.2/builds/324/downloads/paper-1.21.2-324.jar',
+        'download_url': 'https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/389/downloads/paper-1.21.4-389.jar',
         'supports_plugins': True,
         'supports_mods': False,
         'java_args': '-Xmx{memory} -Xms{memory} -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200'
     },
     'forge': {
         'name': 'Forge',
-        'download_url': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar',
+        'download_url': 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.4-49.0.11/forge-1.21.4-49.0.11-installer.jar',
         'supports_plugins': False,
         'supports_mods': True,
         'java_args': '-Xmx{memory} -Xms{memory} -XX:+UseG1GC'
     },
     'fabric': {
         'name': 'Fabric',
-        'download_url': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar',
+        'download_url': 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.0/fabric-installer-1.1.0.jar',
         'supports_plugins': False,
         'supports_mods': True,
         'java_args': '-Xmx{memory} -Xms{memory}'
     },
     'bedrock': {
         'name': 'Bedrock',
-        'download_url': 'https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.10.01.zip',
+        'download_url': 'https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.41.01.zip',
         'supports_plugins': False,
         'supports_mods': False,
         'java_args': ''  # Not using Java
@@ -74,9 +74,6 @@ app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 
 # Global variables
 servers = {}  # Store server configurations
-
-# Initialize server manager
-server_manager = ServerManager()
 
 def load_server_configs():
     """Load all server configurations"""
@@ -123,7 +120,8 @@ def save_server_config(server_id, config):
         logger.error(traceback.format_exc())
 
 def check_server_status(server_id):
-    # Change status_path to check in servers/ directory instead of server/
+    """Check status of server from status.json and workflow status"""
+    # Check in servers/ directory instead of server/
     status_path = f"servers/{server_id}/status.json"
     try:
         if os.path.exists(status_path):
@@ -141,6 +139,7 @@ def check_server_status(server_id):
                 }
     except Exception as e:
         logger.error(f"Error checking status for server {server_id}: {e}")
+    
     # Check active GitHub workflows as fallback
     active_workflows = get_active_github_workflows()
     if any(w.get('server_id') == server_id for w in active_workflows):
@@ -179,11 +178,25 @@ def get_active_github_workflows():
             data = response.json()
             workflows = []
             for run in data.get('workflow_runs', []):
-                if run.get('name', '').startswith('MC Server -'):
-                    server_name = run.get('name').replace('MC Server - ', '')
+                if run.get('name', '').startswith('MC Server -') or run.get('name', '').startswith('Vanilla Minecraft Server') or run.get('name', '').startswith('Paper Minecraft Server') or run.get('name', '').startswith('Fabric Minecraft Server') or run.get('name', '').startswith('Forge Minecraft Server') or run.get('name', '').startswith('Bedrock Minecraft Server'):
+                    # Extract server_id from workflow inputs
+                    server_id = None
+                    if 'inputs' in run:
+                        server_id = run.get('inputs', {}).get('server_id')
+                    
+                    # If we can't extract it, try from the name
+                    if not server_id and ' - ' in run.get('name', ''):
+                        server_name = run.get('name').split(' - ', 1)[1]
+                        # Find server with this name
+                        for sid, sconfig in servers.items():
+                            if sconfig.get('name') == server_name:
+                                server_id = sid
+                                break
+                    
                     workflows.append({
                         'id': run.get('id'),
-                        'name': server_name,
+                        'name': run.get('name'),
+                        'server_id': server_id,
                         'started_at': run.get('run_started_at'),
                         'url': run.get('html_url')
                     })
@@ -195,37 +208,6 @@ def get_active_github_workflows():
         logger.error(f"Error fetching workflows: {e}")
         return []
 
-def send_github_dispatch(event_type, payload=None):
-    """Send repository dispatch event to trigger actions"""
-    if not GITHUB_TOKEN:
-        logger.error("No GitHub token provided, cannot send dispatch")
-        return False
-        
-    if not payload:
-        payload = {}
-    
-    headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
-        'Accept': 'application/vnd.github.v3+json'
-    }
-    
-    data = {
-        'event_type': event_type,
-        'client_payload': payload
-    }
-    
-    try:
-        response = requests.post(f"{GITHUB_API}/dispatches", headers=headers, json=data)
-        if response.status_code == 204:
-            logger.info(f"Successfully triggered {event_type} event")
-            return True
-        else:
-            logger.error(f"Failed to trigger event: {response.status_code}, {response.text}")
-            return False
-    except Exception as e:
-        logger.error(f"Error sending dispatch: {e}")
-        return False
-
 def calculate_memory(max_players):
     """Calculate recommended memory based on max players"""
     # Simple formula: base 1GB + 50MB per player
@@ -236,181 +218,95 @@ def calculate_memory(max_players):
     memory_mb = min(memory_mb, 6144)
     return f"{memory_mb}M"
 
-def create_workflow_file(server_id, server_name, server_type, memory, max_runtime=350, backup_interval=6):
-    """Create a GitHub workflow file for running a Minecraft server"""
-    server_config = servers.get(server_id, {})
+def setup_tunnels(port):
+    """Set up both cloudflare and ngrok tunnels in parallel"""
+    logger.info("Setting up tunnels for admin panel...")
     
-    workflow_path = os.path.join(".github", "workflows", f"server_{server_id}.yml")
-    os.makedirs(os.path.dirname(workflow_path), exist_ok=True)
+    tunnels = {
+        'cloudflare': None,
+        'ngrok': None
+    }
     
-    workflow_content = f"""name: MC Server - {server_name}
-
-on:
-  workflow_dispatch:
-    inputs:
-      memory:
-        description: 'Memory allocation (e.g. 1024M, 2G)'
-        default: '{memory}'
-      max_runtime:
-        description: 'Max runtime in minutes (max 360)'
-        default: '{max_runtime}'
-      backup_interval:
-        description: 'Backup interval in hours'
-        default: '{backup_interval}'
-
-jobs:
-  run-server:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        
-      - name: Set up Java
-"""
-    
-    if server_type != 'bedrock':
-        workflow_content += """
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-"""
-    
-    workflow_content += f"""
-      - name: Restore server files
-        run: |
-          mkdir -p server/{server_id}
-          cd server/{server_id}
-"""
-    
-    # Add server launch section
-    if server_type != 'bedrock':
-        workflow_content += f"""
-      - name: Start Minecraft server
-        run: |
-          cd server/{server_id}
-          {'./start.sh' if server_type == 'forge' else f'java -Xmx{memory} -Xms{memory} -jar server.jar nogui'}
-        env:
-          NGROK_AUTH_TOKEN: ${{{{ secrets.NGROK_AUTH_TOKEN }}}}
-          BACKUP_INTERVAL_HOURS: ${{{{ github.event.inputs.backup_interval || '{server_config.get("backup_interval", 6)}' }}}}
-          MAX_RUNTIME_MINUTES: ${{{{ github.event.inputs.max_runtime || '{server_config.get("max_runtime", 350)}' }}}}
-"""
-    else:
-        workflow_content += f"""
-      - name: Start Bedrock server
-        run: |
-          cd server/{server_id}
-          LD_LIBRARY_PATH=. ./bedrock_server
-        env:
-          NGROK_AUTH_TOKEN: ${{{{ secrets.NGROK_AUTH_TOKEN }}}}
-"""
-
-    workflow_content += """
-      - name: Upload world backup
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: minecraft-backup
-          path: "server/*/backup_*.zip"
-          retention-days: 2
-"""
-
-    with open(workflow_path, 'w') as f:
-        f.write(workflow_content)
-    
-    return workflow_path
-
-def setup_cloudflare_tunnel(port):
+    # Start Cloudflare Tunnel
     try:
-        import subprocess
-        import json
-        import time
-        import re
-        
         logger.info(f"Starting cloudflared tunnel for port {port}...")
-        process = subprocess.Popen(
+        cf_process = subprocess.Popen(
             ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
             stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
         )
         
-        # Wait for tunnel to establish and extract URL
-        time.sleep(5)
-        
-        # Collect output for 10 seconds to ensure we capture the URL
-        output = ""
-        end_time = time.time() + 10
-        while time.time() < end_time:
-            if process.stderr.peek():
-                line = process.stderr.readline().decode('utf-8')
-                output += line
-                # Look for the typical tunnel URL pattern
+        # Start a thread to capture the cloudflare URL
+        def capture_cf_url():
+            for line in cf_process.stderr:
                 match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
                 if match:
-                    tunnel_url = match.group(0)
-                    logger.info(f"Found tunnel URL: {tunnel_url}")
-                    return tunnel_url
-            time.sleep(0.1)
-            
-        # If not found in realtime, search the collected output
-        match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', output)
-        if match:
-            tunnel_url = match.group(0)
-            logger.info(f"Found tunnel URL in collected output: {tunnel_url}")
-            return tunnel_url
-                
-        logger.error("Could not find valid tunnel URL in cloudflared output")
-        logger.debug(f"Cloudflared output: {output}")
-        return None
+                    tunnels['cloudflare'] = match.group(0)
+                    logger.info(f"Cloudflare tunnel established: {tunnels['cloudflare']}")
+                    break
+        
+        cf_thread = threading.Thread(target=capture_cf_url)
+        cf_thread.daemon = True
+        cf_thread.start()
     except Exception as e:
-        logger.error(f"Error setting up Cloudflare tunnel: {e}")
-        return None
-
-def debug_list_workflows():
-    """List all workflows on the admin_panel branch and log their names and paths."""
-    if not GITHUB_TOKEN:
-        logger.error("No GitHub token provided for workflow debug.")
-        return
-
-    headers = {
-        'Authorization': f"Bearer {GITHUB_TOKEN}",
-        'Accept': 'application/vnd.github+json'
-    }
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows?ref=admin_panel"
-    logger.info(f"DEBUG: Listing workflows with URL: {url}")
-    response = requests.get(url, headers=headers)
-    logger.info(f"DEBUG: List workflows status: {response.status_code}")
+        logger.error(f"Error starting Cloudflare tunnel: {e}")
+    
+    # Start ngrok Tunnel
     try:
-        data = response.json()
-        logger.info(f"DEBUG: Workflows response: {json.dumps(data, indent=2)}")
+        # Install pyngrok if needed
+        try:
+            from pyngrok import ngrok, conf
+        except ImportError:
+            logger.info("Installing pyngrok package...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyngrok"])
+            from pyngrok import ngrok, conf
+        
+        # Configure ngrok with auth token if available
+        ngrok_token = os.environ.get('NGROK_AUTH_TOKEN')
+        if ngrok_token:
+            conf.get_default().auth_token = ngrok_token
+        
+        # Start tunnel
+        logger.info(f"Starting ngrok tunnel on port {port}...")
+        tunnel = ngrok.connect(port, "http")
+        tunnels['ngrok'] = tunnel.public_url
+        logger.info(f"ngrok tunnel established: {tunnels['ngrok']}")
     except Exception as e:
-        logger.error(f"DEBUG: Could not decode workflows response: {e}")
+        logger.error(f"Error setting up ngrok tunnel: {e}")
+    
+    # Wait a moment to allow both tunnels to establish
+    time.sleep(5)
+    
+    return tunnels
 
 @app.route('/')
 def index():
     """Main page that lists all servers"""
     load_server_configs()
-    active_workflows = get_active_github_workflows()
+    current_year = datetime.datetime.now().year
     
-    # Update server status based on active workflows and server manager
+    # Update server status based on active workflows
+    active_workflows = get_active_github_workflows()
     for server_id, server in servers.items():
-        if server_manager and server_id in server_manager.servers:
-            # Get status from server manager for locally running servers
-            server_status = server_manager.get_server_status(server_id)
-            server['is_active'] = server_status['running']
-            server['address'] = server_status['address']
-            server['online_players'] = server_status.get('online_players', 0)
-        else:
-            # Fall back to GitHub workflow check
-            server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
-            server['status'] = check_server_status(server_id)
-            server['address'] = None
+        # Check if server is active in workflows
+        is_active_in_workflow = any(w.get('server_id') == server_id for w in active_workflows)
+        if is_active_in_workflow:
+            server['is_active'] = True
+            server['last_started'] = time.time()
+        
+        # Check status file for updated info
+        status = check_server_status(server_id)
+        server['status'] = status['status']
+        server['address'] = status['address']
     
     return render_template('dashboard.html', 
-                          servers=servers, 
-                          active_workflows=active_workflows)
+                           servers=servers, 
+                           active_workflows=active_workflows,
+                           current_year=current_year,
+                           REPO_OWNER=REPO_OWNER,
+                           REPO_NAME=REPO_NAME)
 
 @app.route('/create-server', methods=['GET', 'POST'])
 def create_server():
@@ -469,27 +365,31 @@ def view_server(server_id):
     load_server_configs()
     
     if server_id not in servers:
-        flash('Server not found', 'error')
+        flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
     
     server = servers[server_id]
-    server['status'] = check_server_status(server_id)
     
-    # Get up-to-date server information from the server manager
-    if server_manager and server_id in server_manager.servers:
-        server_status = server_manager.get_server_status(server_id)
-        server['is_active'] = server_status['running']
-        server['address'] = server_status['address']
-        server['online_players'] = server_status.get('online_players', 0)
+    # Check status in status.json file
+    status_info = check_server_status(server_id)
+    server['status'] = status_info['status']
+    server['address'] = status_info['address']
+    server['is_active'] = server['status'] in ['online', 'starting']
+    
+    # Check if the server has a custom JAR file
+    server_dir = os.path.join("servers", server_id)
+    if os.path.exists(server_dir):
+        jar_files = [f for f in os.listdir(server_dir) if f.endswith('.jar') and f != 'server.jar']
+        server['has_custom_jar'] = len(jar_files) > 0
+        server['custom_jar_name'] = jar_files[0] if server['has_custom_jar'] else None
     else:
-        # Fall back to GitHub workflow check
-        active_workflows = get_active_github_workflows()
-        server['is_active'] = any(w['name'] == server.get('name', '') for w in active_workflows)
-        server['address'] = None
+        server['has_custom_jar'] = False
     
     return render_template('manage_server.html', 
                           server=server,
-                          server_id=server_id)
+                          server_id=server_id,
+                          REPO_OWNER=REPO_OWNER,
+                          REPO_NAME=REPO_NAME)
 
 @app.route('/server/<server_id>/start', methods=['POST'])
 def start_server(server_id):
@@ -549,76 +449,32 @@ def start_server(server_id):
 
 @app.route('/server/<server_id>/stop', methods=['POST'])
 def stop_server(server_id):
-    """Stop a running Minecraft server"""
+    """Stop a Minecraft server"""
     load_server_configs()
     
     if server_id not in servers:
-        flash('Server not found', 'error')
+        flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
     
+    # Update the status in our config
+    servers[server_id]['is_active'] = False
+    save_server_config(server_id, servers[server_id])
+    
+    # Create a status file that indicates the server is stopped
+    status_path = f"servers/{server_id}/status.json"
     try:
-        # First, check if there's an active workflow for this server
-        active_workflows = get_active_github_workflows()
-        workflow_run_id = None
-        
-        for workflow in active_workflows:
-            if workflow.get('server_id') == server_id:
-                workflow_run_id = workflow.get('id')
-                break
-        
-        if workflow_run_id:
-            # Cancel the running workflow
-            headers = {
-                'Authorization': f"token {GITHUB_TOKEN}",
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            cancel_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs/{workflow_run_id}/cancel"
-            response = requests.post(cancel_url, headers=headers)
-            
-            if response.status_code == 202:
-                flash('Server shutdown initiated. It may take a minute to complete.', 'success')
-                # Update server status
-                servers[server_id]['is_active'] = False
-                save_server_config(server_id, servers[server_id])
-            else:
-                logger.error(f"Failed to cancel workflow: {response.status_code} - {response.text}")
-                flash(f'Failed to stop server: {response.status_code}', 'error')
-        else:
-            # No active workflow found, update server status
-            servers[server_id]['is_active'] = False
-            save_server_config(server_id, servers[server_id])
-            flash('Server was already stopped or not running.', 'info')
-        
+        status = {
+            'address': 'Not available',
+            'running': False,
+            'timestamp': int(time.time())
+        }
+        os.makedirs(os.path.dirname(status_path), exist_ok=True)
+        with open(status_path, 'w') as f:
+            json.dump(status, f)
     except Exception as e:
-        logger.error(f"Error stopping server {server_id}: {e}")
-        flash(f'Error stopping server: {str(e)}', 'error')
+        logger.error(f"Error updating status file: {e}")
     
-    return redirect(url_for('view_server', server_id=server_id))
-
-@app.route('/server/<server_id>/send-command', methods=['POST'])
-def send_command(server_id=None):
-    """Send a command to a running Minecraft server"""
-    if not server_id:
-        server_id = request.form.get('server_id')
-    
-    command = request.form.get('command')
-    
-    if not server_id or not command:
-        flash('Missing server ID or command', 'error')
-        return redirect(url_for('index'))
-    
-    # Send command via repository dispatch
-    success = send_github_dispatch('minecraft-server-command', {
-        'server_id': server_id,
-        'command': command
-    })
-    
-    if success:
-        flash(f'Command sent: {command}', 'success')
-    else:
-        flash('Failed to send command', 'error')
-    
+    flash('Server has been stopped.', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/delete', methods=['POST'])
@@ -627,178 +483,138 @@ def delete_server(server_id):
     load_server_configs()
     
     if server_id not in servers:
-        flash('Server not found', 'error')
+        flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
     
-    # Check if server is running
-    active_workflows = get_active_github_workflows()
-    if any(w['name'] == servers[server_id].get('name', '') for w in active_workflows):
-        flash('Cannot delete a running server. Stop it first.', 'error')
+    # Check if server is currently running
+    if servers[server_id].get('is_active', False):
+        flash('Cannot delete server while it is running. Stop the server first.', 'error')
         return redirect(url_for('view_server', server_id=server_id))
     
-    # Delete server config
+    # Delete the config file
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     if os.path.exists(config_path):
         os.remove(config_path)
     
-    # Delete workflow file
-    workflow_path = os.path.join(".github", "workflows", f"server_{server_id}.yml")
-    if os.path.exists(workflow_path):
-        os.remove(workflow_path)
+    # Remove the server from memory
+    server_name = servers[server_id].get('name', 'Unnamed Server')
+    del servers[server_id]
     
-    flash('Server deleted successfully', 'success')
+    flash(f'Server "{server_name}" has been deleted.', 'success')
     return redirect(url_for('index'))
+
+@app.route('/server/<server_id>/send-command', methods=['POST'])
+def send_command(server_id):
+    """Send a command to the server"""
+    command = request.form.get('command', '')
+    
+    if not command:
+        flash('Command cannot be empty', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    
+    # For now, just acknowledge the command since we're using GitHub Actions
+    flash(f'Command functionality is not available with GitHub Actions workflows.', 'warning')
+    return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/upload-jar', methods=['POST'])
 def upload_server_jar(server_id):
-    """Upload a custom server JAR for a server"""
-    if server_id not in servers:
-        flash('Server not found', 'error')
-        return redirect(url_for('index'))
-    
-    # Check if the server is running
-    if server_manager and server_id in server_manager.servers:
-        flash('Cannot upload JAR while server is running', 'error')
-        return redirect(url_for('view_server', server_id=server_id))
-    
-    # Check if the post request has the file part
+    """Upload a custom server JAR file"""
     if 'jar_file' not in request.files:
         flash('No file part', 'error')
         return redirect(url_for('view_server', server_id=server_id))
     
-    jar_file = request.files['jar_file']
-    
-    # If user does not select file, browser also submit empty part without filename
-    if jar_file.filename == '':
+    file = request.files['jar_file']
+    if file.filename == '':
         flash('No selected file', 'error')
         return redirect(url_for('view_server', server_id=server_id))
     
-    if jar_file and jar_file.filename.endswith('.jar'):
-        try:
-            # Create server directory if it doesn't exist
-            server_dir = os.path.join('server', server_id)
-            os.makedirs(server_dir, exist_ok=True)
+    if file and file.filename.endswith('.jar'):
+        server_dir = os.path.join("servers", server_id)
+        os.makedirs(server_dir, exist_ok=True)
+        
+        # Save the JAR file
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(server_dir, filename))
+        
+        # Create a symlink to server.jar for compatibility
+        if filename != 'server.jar':
+            server_jar_path = os.path.join(server_dir, "server.jar")
+            if os.path.exists(server_jar_path):
+                os.remove(server_jar_path)
             
-            # Save the JAR file
-            jar_path = os.path.join(server_dir, 'server.jar')
-            jar_file.save(jar_path)
-            
-            # Update server config
-            servers[server_id]['has_custom_jar'] = True
-            servers[server_id]['custom_jar_name'] = jar_file.filename
-            save_server_config(server_id, servers[server_id])
-            
-            flash(f'Server JAR "{jar_file.filename}" uploaded successfully', 'success')
-        except Exception as e:
-            logger.error(f"Error uploading JAR for server {server_id}: {e}")
-            flash(f'Error uploading JAR: {str(e)}', 'error')
+            # On Windows, symlinks require admin privileges, so copy instead
+            import shutil
+            shutil.copy2(os.path.join(server_dir, filename), server_jar_path)
+        
+        flash(f'Server JAR file "{filename}" uploaded successfully', 'success')
     else:
-        flash('Invalid file type. Please upload a .jar file', 'error')
+        flash('Invalid file type. Please upload a JAR file.', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/download-jar', methods=['POST'])
 def download_server_jar(server_id):
-    """Download a custom server JAR for a server from URL"""
-    if server_id not in servers:
-        flash('Server not found', 'error')
-        return redirect(url_for('index'))
+    """Download a server JAR from a URL"""
+    jar_url = request.form.get('jar_url', '')
     
-    # Check if the server is running
-    if server_manager and server_id in server_manager.servers:
-        flash('Cannot change JAR while server is running', 'error')
-        return redirect(url_for('view_server', server_id=server_id))
-    
-    jar_url = request.form.get('jar_url')
     if not jar_url:
-        flash('No URL provided', 'error')
+        flash('Please provide a download URL', 'error')
         return redirect(url_for('view_server', server_id=server_id))
     
     try:
-        # Create server directory if it doesn't exist
-        server_dir = os.path.join('server', server_id)
+        server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
         
         # Download the JAR file
-        jar_path = os.path.join(server_dir, 'server.jar')
-        
-        # Extract filename from URL or use a default
-        jar_filename = os.path.basename(jar_url.split('?')[0]) or 'custom_server.jar'
-        
-        logger.info(f"Downloading JAR from {jar_url} for server {server_id}")
         response = requests.get(jar_url, stream=True)
-        
-        if response.status_code != 200:
+        if response.status_code == 200:
+            # Get filename from URL or use default
+            if 'Content-Disposition' in response.headers:
+                content_disposition = response.headers['Content-Disposition']
+                filename = re.findall('filename="(.+)"', content_disposition)[0]
+            else:
+                filename = jar_url.split('/')[-1]
+            
+            if not filename.endswith('.jar'):
+                filename += '.jar'
+            
+            filename = secure_filename(filename)
+            file_path = os.path.join(server_dir, filename)
+            
+            # Save the file
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            # Create a symlink to server.jar for compatibility
+            if filename != 'server.jar':
+                server_jar_path = os.path.join(server_dir, "server.jar")
+                if os.path.exists(server_jar_path):
+                    os.remove(server_jar_path)
+                
+                # On Windows, symlinks require admin privileges, so copy instead
+                import shutil
+                shutil.copy2(file_path, server_jar_path)
+            
+            flash(f'Server JAR file "{filename}" downloaded successfully', 'success')
+        else:
             flash(f'Failed to download JAR file: {response.status_code}', 'error')
-            return redirect(url_for('view_server', server_id=server_id))
-        
-        with open(jar_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        # Update server config
-        servers[server_id]['has_custom_jar'] = True
-        servers[server_id]['custom_jar_name'] = jar_filename
-        save_server_config(server_id, servers[server_id])
-        
-        flash(f'Server JAR "{jar_filename}" downloaded successfully', 'success')
     except Exception as e:
-        logger.error(f"Error downloading JAR for server {server_id}: {e}")
-        flash(f'Error downloading JAR: {str(e)}', 'error')
+        logger.error(f"Error downloading JAR file: {e}")
+        flash(f'Error downloading JAR file: {str(e)}', 'error')
     
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
-    """Shutdown the admin panel server and the GitHub Action"""
-    try:
-        # Make sure to save all server configurations before shutting down
-        global servers
-        logger.info("Saving server configurations before shutting down...")
-        
-        # Ensure server_configs directory exists
-        os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
-        
-        # Stop all local servers first
-        if server_manager:
-            logger.info("Stopping all running servers...")
-            server_manager.cleanup()
-        
-        # Save each server configuration
-        for server_id, server_config in servers.items():
-            try:
-                # Update the server state before saving
-                if server_manager and server_id in server_manager.servers:
-                    status = server_manager.get_server_status(server_id)
-                    server_config['is_active'] = status.get('running', False)
-                
-                save_server_config(server_id, server_config)
-            except Exception as e:
-                logger.error(f"Error saving server config {server_id}: {e}")
-        
-        # Create a marker file that signals workflow should end
-        with open("SHUTDOWN_REQUESTED", "w") as f:
-            f.write("shutdown")
-        
-        flash('Admin panel is shutting down...', 'success')
-        
-        # Return a response before the server shuts down
-        response = make_response(render_template('shutdown.html'))
-        
-        # Schedule a delayed terminate of the entire process
-        def delayed_shutdown():
-            time.sleep(2)  # Give time for response to be sent
-            os._exit(0)  # Force exit the entire process
-            
-        thread = threading.Thread(target=delayed_shutdown)
-        thread.daemon = True
-        thread.start()
-        
-        return response
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
-        flash(f'Error during shutdown: {e}', 'error')
-        return redirect(url_for('index'))
+    """Shutdown the admin panel"""
+    # Create a flag file to signal the workflow to stop
+    with open("SHUTDOWN_REQUESTED", "w") as f:
+        f.write("Shutdown requested at " + str(datetime.datetime.now()))
+    
+    # Return a message
+    return render_template('shutdown.html')
 
 def main():
     """Main function to run the admin panel"""
@@ -812,29 +628,33 @@ def main():
     
     # Create required directories
     os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
-    os.makedirs("server", exist_ok=True)  # Main server directory
+    os.makedirs("servers", exist_ok=True)  # Main server directory
     os.makedirs(".github/workflows", exist_ok=True)  # Ensure workflows directory exists
-    os.makedirs(".github/workflows/server_templates", exist_ok=True)  # Templates directory
-    
-    # Check if uploads exists as a file and handle it
-    if os.path.exists(UPLOADS_DIR) and not os.path.isdir(UPLOADS_DIR):
-        os.remove(UPLOADS_DIR)  # Remove if it's a file
     os.makedirs(UPLOADS_DIR, exist_ok=True)
-    
     os.makedirs("admin_panel/templates", exist_ok=True)
     os.makedirs("admin_panel/static/css", exist_ok=True)
     
     # Load server configurations
     load_server_configs()
     
-    # Set up Cloudflare tunnel for public access
-    public_url = setup_cloudflare_tunnel(admin_port)
-    if public_url:
-        logger.info(f"✨ ADMIN PANEL URL: {public_url} ✨")
-        print(f"Notice: {public_url}")
+    # Set up both tunnels for public access
+    tunnel_urls = setup_tunnels(admin_port)
+    
+    # Display URLs to access admin panel
+    if tunnel_urls['cloudflare']:
+        print(f"\n✨ ADMIN PANEL via CLOUDFLARE: {tunnel_urls['cloudflare']} ✨")
+        print(f"::notice::Admin Panel URL (Cloudflare): {tunnel_urls['cloudflare']}")
     else:
-        logger.warning("Failed to set up Cloudflare tunnel, panel will only be accessible locally")
-        logger.info(f"Admin panel available locally at: http://localhost:{admin_port}")
+        print("\n⚠️ Cloudflare tunnel not established!")
+    
+    if tunnel_urls['ngrok']:
+        print(f"\n✨ ADMIN PANEL via NGROK: {tunnel_urls['ngrok']} ✨")
+        print(f"::notice::Admin Panel URL (ngrok): {tunnel_urls['ngrok']}")
+    else:
+        print("\n⚠️ ngrok tunnel not established!")
+    
+    if not tunnel_urls['cloudflare'] and not tunnel_urls['ngrok']:
+        print("\n⚠️ WARNING: Failed to establish any tunnels! Admin panel will only be available locally at http://localhost:%d" % admin_port)
     
     # Run Flask app
     app.run(host='0.0.0.0', port=admin_port, debug=False)

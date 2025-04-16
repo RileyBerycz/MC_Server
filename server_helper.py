@@ -143,16 +143,17 @@ def start_server(server_id, server_type, initialize_only=False):
         nonlocal initialized
         try:
             for line in iter(process.stdout.readline, ''):
-                print(f"SERVER OUTPUT: {line.strip()}")
+                # Add flush=True to ensure output appears immediately
+                print(f"SERVER OUTPUT: {line.strip()}", flush=True)
                 if "Done" in line and "For help, type" in line:
-                    print("Server initialization completed!")
+                    print("Server initialization completed!", flush=True)
                     initialized = True
                     if initialize_only:
-                        print("Server initialized, shutting down for files generation")
+                        print("Server initialized, shutting down", flush=True)
                         process.terminate()
                         break
         except Exception as e:
-            print(f"Error reading server output: {e}")
+            print(f"Error reading server output: {e}", flush=True)
     
     output_thread = threading.Thread(target=read_output)
     output_thread.daemon = True
@@ -187,29 +188,36 @@ def start_server(server_id, server_type, initialize_only=False):
 
 def setup_cloudflared_tunnel():
     """Setup a Cloudflare tunnel and return the tunnel URL"""
-    print("Setting up Cloudflare tunnel")
+    print("Setting up Cloudflare tunnel", flush=True)
     tunnel_process = subprocess.Popen(
         ["cloudflared", "tunnel", "--url", "tcp://localhost:25565"],
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True
+        stderr=subprocess.STDOUT,  # Combine stderr and stdout
+        universal_newlines=True,
+        bufsize=1  # Line buffering
     )
+    
+    print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
     
     # Wait for the tunnel to start (up to 30 seconds)
     start_time = time.time()
     tunnel_url = None
+    
+    print("Waiting for tunnel URL...", flush=True)
     while time.time() - start_time < 30:
         output = tunnel_process.stdout.readline()
-        print(output, end='')
+        # Print immediately with flush
+        print(f"CLOUDFLARED: {output.strip()}", flush=True)
+        
         # Look for the tunnel URL in the output
         match = re.search(r'tcp://[a-zA-Z0-9\-]+\.trycloudflare\.com', output)
         if match:
             tunnel_url = match.group(0)
+            print(f"Found tunnel URL: {tunnel_url}", flush=True)
             break
     
     if not tunnel_url:
-        print("Failed to get tunnel URL")
-        return None, None
+        print("Failed to get tunnel URL within timeout", flush=True)
     
     return tunnel_url, tunnel_process
 
@@ -258,14 +266,18 @@ if __name__ == "__main__":
         
         # Keep running until interrupted
         try:
+            print("Server is running. Press Ctrl+C to stop.", flush=True)
             while True:
-                time.sleep(1)
-                # Check if server is still running
+                time.sleep(30)  # Check every 30 seconds instead of every second
                 if server_process.poll() is not None:
-                    print("Server process ended")
+                    print(f"Server process ended with code: {server_process.returncode}", flush=True)
                     break
+                # Periodically report status to keep logs active
+                print(f"Server still running. Last timestamp: {time.time()}", flush=True)
+                # Also update the status.json file to keep timestamp current
+                write_status_file(server_id, tunnel_url)
         except KeyboardInterrupt:
-            print("Stopping server and tunnel")
+            print("Stopping server and tunnel", flush=True)
             server_process.terminate()
             tunnel_process.terminate()
             
