@@ -571,20 +571,8 @@ def start_server(server_id):
         
         # Prepare inputs for the workflow
         inputs = {
-            'server_id': server_id,
-            'server_name': server_name,
-            'max_players': str(server_config.get('max_players', 20)),
-            'memory': server_config.get('memory', '2G'),
-            'difficulty': server_config.get('difficulty', 'normal'),
-            'gamemode': server_config.get('gamemode', 'survival'),
-            'seed': server_config.get('seed', '')
+            'server_id': server_id
         }
-        
-        # Optional inputs
-        if 'max_runtime' in server_config:
-            inputs['max_runtime'] = str(server_config['max_runtime'])
-        if 'backup_interval' in server_config:
-            inputs['backup_interval'] = str(server_config['backup_interval'])
         
         data = {
             'ref': 'admin_panel',  # <-- Use your working branch here!
