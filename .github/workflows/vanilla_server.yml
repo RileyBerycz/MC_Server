@@ -14,6 +14,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install cloudflared
+        run: |
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}
 
@@ -31,6 +42,17 @@ jobs:
         run: |
           cd servers/${{ inputs.server_id }}
           java -Xmx2G -Xms2G -jar server.jar nogui || true
+
+      - name: Start Cloudflared tunnel
+        run: |
+          cd servers/${{ inputs.server_id }}
+          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
+          sleep 10
+          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
+          if [ ! -z "$TUNNEL_URL" ]; then
+            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
+          fi
+          cat tunnel.log
 
       - name: Commit generated files
         run: |

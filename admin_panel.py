@@ -123,27 +123,23 @@ def save_server_config(server_id, config):
         logger.error(traceback.format_exc())
 
 def check_server_status(server_id):
-    """Check the status of a specific server"""
     status_path = f"server/{server_id}/status.json"
-    
     try:
         if os.path.exists(status_path):
             with open(status_path, 'r') as f:
                 status = json.load(f)
-                
-            # Check if status is recent (within last 5 minutes)
+            # If status is recent (within last 5 minutes)
             if time.time() - status.get('timestamp', 0) < 300:
                 return {
-                    'status': 'online' if status.get('running', False) else 'offline',
+                    'status': 'online' if status.get('running') else 'offline',
                     'address': status.get('address', 'Not available'),
-                    'players': status.get('players', []),
-                    'online_players': len(status.get('players', [])),
+                    'players': [],
+                    'online_players': 0,
                     'version': servers.get(server_id, {}).get('type', 'Unknown'),
                     'timestamp': status.get('timestamp', 0)
                 }
     except Exception as e:
         logger.error(f"Error checking status for server {server_id}: {e}")
-    
     # Check active GitHub workflows as fallback
     active_workflows = get_active_github_workflows()
     if any(w.get('server_id') == server_id for w in active_workflows):
@@ -450,34 +446,26 @@ def create_server():
         # Save the server configuration
         save_server_config(server_id, server_config)
         servers[server_id] = server_config
-        
-        # Create server directory structure in the repository
+
+        # --- Ensure server folder is created and committed ---
         server_dir = os.path.join("server", server_id)
         os.makedirs(server_dir, exist_ok=True)
-        
-        # Create a basic README in the server directory to track it in git
-        with open(os.path.join(server_dir, "README.md"), 'w') as f:
+        readme_path = os.path.join(server_dir, "README.md")
+        with open(readme_path, 'w') as f:
             f.write(f"# {server_name}\n\nServer ID: {server_id}\nType: {server_type}\nCreated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        
-        # Try to commit the directory structure
+
         try:
-            # Set Git identity
             subprocess.run(['git', 'config', 'user.email', 'minecraft-server@github.com'], check=True)
             subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
-            
-            # Add and commit
             subprocess.run(['git', 'add', server_dir], check=True)
             subprocess.run(['git', 'commit', '-m', f"Create server directory for {server_name} [skip ci]"], check=True)
-            
-            # Push (without token in URL for security)
             subprocess.run(['git', 'push'], check=True)
-            
             logger.info(f"Successfully created and pushed server directory {server_dir}")
             flash(f'Server "{server_name}" created successfully!', 'success')
         except Exception as e:
             logger.error(f"Error pushing server directory to GitHub: {e}")
             flash(f'Server created, but failed to publish directory: {e}', 'warning')
-        
+
         return redirect(url_for('index'))
     
     return render_template('create_server.html', server_types=SERVER_TYPES)
