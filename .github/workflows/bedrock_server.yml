@@ -125,3 +125,37 @@ jobs:
             server/${{ inputs.server_id }}/permissions.json
             server/${{ inputs.server_id }}/whitelist.json
           retention-days: 7
+
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Bedrock server if missing
+        run: |
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f bedrock_server ]; then
+            curl -o bedrock-server.zip "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.41.01.zip"
+            unzip -o bedrock-server.zip
+            chmod +x bedrock_server
+            rm bedrock-server.zip
+          fi
+
+      - name: Start Bedrock server (first run generates files)
+        run: |
+          cd servers/${{ inputs.server_id }}
+          LD_LIBRARY_PATH=. ./bedrock_server || true
+
+      - name: Commit generated files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

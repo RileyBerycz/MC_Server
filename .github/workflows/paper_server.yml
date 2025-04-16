@@ -130,3 +130,37 @@ jobs:
             server/${{ inputs.server_id }}/banned-players.json
             server/${{ inputs.server_id }}/banned-ips.json
           retention-days: 7
+
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Paper jar if missing
+        run: |
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f server.jar ]; then
+            curl -o server.jar "https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/389/downloads/paper-1.21.4-389.jar"
+          fi
+
+      - name: Accept EULA
+        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
+
+      - name: Start server (first run generates files)
+        run: |
+          cd servers/${{ inputs.server_id }}
+          java -Xmx2G -Xms2G -jar server.jar nogui || true
+
+      - name: Commit generated files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

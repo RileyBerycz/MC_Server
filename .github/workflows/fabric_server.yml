@@ -140,3 +140,38 @@ jobs:
             server/${{ inputs.server_id }}/banned-players.json
             server/${{ inputs.server_id }}/banned-ips.json
           retention-days: 7
+
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Fabric installer and setup server
+        run: |
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f fabric-installer.jar ]; then
+            curl -o fabric-installer.jar "https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar"
+            java -jar fabric-installer.jar server -mcversion 1.21.4 -downloadMinecraft
+          fi
+
+      - name: Accept EULA
+        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
+
+      - name: Start server (first run generates files)
+        run: |
+          cd servers/${{ inputs.server_id }}
+          java -Xmx2G -Xms2G -jar fabric-server-launch.jar nogui || true
+
+      - name: Commit generated files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

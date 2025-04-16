@@ -1,142 +1,43 @@
 name: Vanilla Minecraft Server
-# Java minecraft server (vanilla) workflow
-# This workflow deploys a vanilla Minecraft server using GitHub Actions.
-# It allows for customization of server settings and includes a backup mechanism.
-# The server is run in a Cloudflare tunnel for secure access.
-# The workflow is triggered manually with input parameters for server configuration.
-# The server is set up with a specified amount of memory, maximum players, and other settings.
-# The server properties are configured, and the server is started with the specified settings.
-# The server's world data is saved as an artifact for future use.
-# The workflow also includes error handling and logging for troubleshooting.
-# The server is set to run for a maximum specified time, after which it will be terminated.
-# The workflow is designed to be reusable and can be customized for different server configurations.
-# The server is set to run in a specific directory, and previous world data is downloaded if available.
-# The server is set up with a specific game mode, difficulty, and other settings.
+
 on:
   workflow_dispatch:
     inputs:
       server_id:
         description: 'Server ID'
         required: true
-      server_name:
-        description: 'Server Name'
-        required: true
-      max_players:
-        description: 'Maximum number of players'
-        default: '20'
-        required: true
-      memory:
-        description: 'Memory allocation for the server (e.g., 2G, 4G)'
-        default: '2G'
-        required: true
-      difficulty:
-        description: 'Game difficulty'
-        default: 'normal'
-        required: false
-      gamemode:
-        description: 'Game mode'
-        default: 'survival'
-        required: false
-      seed:
-        description: 'World seed'
-        required: false
-      max_runtime:
-        description: 'Maximum runtime in minutes'
-        default: '350'
-        required: false
-      backup_interval:
-        description: 'Backup interval in hours'
-        default: '6'
-        required: false
 
 jobs:
-  deploy:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ fromJSON(inputs.max_runtime) }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
 
-      - name: Create server directory
-        run: mkdir -p server/${{ inputs.server_id }}
-
-      - name: Download previous world data
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: world-data-${{ inputs.server_id }}
-          path: server/${{ inputs.server_id }}
-
-      - name: Install cloudflared
+      - name: Download server jar if missing
         run: |
-          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared.deb
-
-      - name: Download Vanilla Server
-        run: |
-          cd server/${{ inputs.server_id }}
-          # Use the latest Minecraft server JAR if no custom JAR exists
-          if [ ! -f "server.jar" ]; then
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f server.jar ]; then
             curl -o server.jar "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
           fi
-          # Create EULA file
-          echo "eula=true" > eula.txt
-        continue-on-error: false
 
-      - name: Setup server files
-        run: |
-          cd server/${{ inputs.server_id }}
-          # Create or update server.properties
-          cat > server.properties << EOF
-          max-players=${{ inputs.max_players }}
-          server-port=25565
-          difficulty=${{ inputs.difficulty }}
-          gamemode=${{ inputs.gamemode }}
-          ${inputs.seed:+level-seed=${{ inputs.seed }}}
-          enable-command-block=true
-          spawn-protection=0
-          EOF
+      - name: Accept EULA
+        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
 
-      - name: Start Cloudflared tunnel
+      - name: Start server (first run generates files)
         run: |
-          cd server/${{ inputs.server_id }}
-          cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
-          echo "Waiting for tunnel to establish..."
-          sleep 10
-          # Extract and display tunnel URL
-          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
-          # Save the tunnel URL to a status file
-          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
-          if [ ! -z "$TUNNEL_URL" ]; then
-            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
-          fi
-          cat tunnel.log
+          cd servers/${{ inputs.server_id }}
+          java -Xmx2G -Xms2G -jar server.jar nogui || true
 
-      - name: Start Vanilla Server
+      - name: Commit generated files
         run: |
-          cd server/${{ inputs.server_id }}
-          java -Xmx${{ inputs.memory }} -Xms${{ inputs.memory }} -jar server.jar nogui
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git push
         env:
-          EULA: 'TRUE'
-          MAX_PLAYERS: ${{ inputs.max_players }}
-
-      - name: Save world data
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: world-data-${{ inputs.server_id }}
-          path: |
-            server/${{ inputs.server_id }}/world
-            server/${{ inputs.server_id }}/server.properties
-            server/${{ inputs.server_id }}/ops.json
-            server/${{ inputs.server_id }}/whitelist.json
-            server/${{ inputs.server_id }}/banned-players.json
-            server/${{ inputs.server_id }}/banned-ips.json
-          retention-days: 7
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

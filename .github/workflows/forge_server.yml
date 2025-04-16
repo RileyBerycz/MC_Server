@@ -147,3 +147,39 @@ jobs:
             server/${{ inputs.server_id }}/banned-players.json
             server/${{ inputs.server_id }}/banned-ips.json
           retention-days: 7
+
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare server directory
+        run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Download Forge installer and setup server
+        run: |
+          cd servers/${{ inputs.server_id }}
+          if [ ! -f forge-installer.jar ]; then
+            curl -o forge-installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.4-49.0.11/forge-1.21.4-49.0.11-installer.jar"
+            java -jar forge-installer.jar --installServer
+          fi
+
+      - name: Accept EULA
+        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
+
+      - name: Start server (first run generates files)
+        run: |
+          cd servers/${{ inputs.server_id }}
+          FORGE_JAR=$(ls forge-*-universal.jar | head -n 1)
+          java -Xmx2G -Xms2G -jar $FORGE_JAR nogui || true
+
+      - name: Commit generated files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
