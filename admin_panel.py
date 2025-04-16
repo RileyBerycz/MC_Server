@@ -564,7 +564,7 @@ def start_server(server_id):
             inputs['backup_interval'] = str(server_config['backup_interval'])
         
         data = {
-            'ref': 'main',  # Branch that contains the workflow file
+            'ref': 'admin_panel',  # <-- Use your working branch here!
             'inputs': inputs
         }
         
