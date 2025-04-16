@@ -10,6 +10,7 @@ import requests
 import traceback
 import subprocess
 import datetime
+import shutil
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
 from server_manager import ServerManager  
@@ -502,16 +503,47 @@ def start_server(server_id):
     server_type = server_config.get('type', 'vanilla')
     server_name = server_config.get('name', 'Unnamed Server')
     
-    # Use the workflow file directly in .github/workflows directory
-    workflow_file = f"{server_type}_server.yml"
-    
     try:
         logger.info(f"Starting server {server_id} using GitHub Actions")
         
+        # First, ensure the workflow file exists in the correct location
+        source_path = os.path.join(".github", "workflows", "server_templates", f"{server_type}_server.yml")
+        target_path = os.path.join(".github", "workflows", f"{server_type}_server.yml")
+        
+        if os.path.exists(source_path) and not os.path.exists(target_path):
+            # Copy the workflow template to the correct location
+            shutil.copy(source_path, target_path)
+            logger.info(f"Copied workflow template from {source_path} to {target_path}")
+            
+            # Try to commit the new workflow file
+            try:
+                # Set Git identity
+                subprocess.run(['git', 'config', 'user.email', 'minecraft-server@github.com'], check=True)
+                subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
+                
+                # Add and commit
+                subprocess.run(['git', 'add', target_path], check=True)
+                subprocess.run(['git', 'commit', '-m', f"Add {server_type} workflow for GitHub Actions [skip ci]"], check=True)
+                
+                # Push (without token in URL for security)
+                subprocess.run(['git', 'push'], check=True)
+                
+                logger.info(f"Successfully committed and pushed workflow file {target_path}")
+            except Exception as e:
+                logger.warning(f"Could not commit workflow file: {e}")
+                # Continue anyway - the file exists locally now
+        elif not os.path.exists(target_path):
+            flash(f'Workflow template for {server_type} not found', 'error')
+            return redirect(url_for('view_server', server_id=server_id))
+        
+        # Now use the correct workflow path that the GitHub API expects
+        workflow_file = f"{server_type}_server.yml"
+        
         # Use the GitHub API to dispatch the workflow
         headers = {
-            'Authorization': f"token {GITHUB_TOKEN}",
-            'Accept': 'application/vnd.github+json'
+            'Authorization': f"Bearer {GITHUB_TOKEN}",  # Changed to Bearer token format
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'  # Added API version
         }
         
         # Prepare inputs for the workflow
@@ -532,7 +564,7 @@ def start_server(server_id):
             inputs['backup_interval'] = str(server_config['backup_interval'])
         
         data = {
-            'ref': 'main',  # Use the main branch
+            'ref': 'main',  # Branch that contains the workflow file
             'inputs': inputs
         }
         
