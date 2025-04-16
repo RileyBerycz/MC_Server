@@ -491,7 +491,7 @@ def view_server(server_id):
 
 @app.route('/server/<server_id>/start', methods=['POST'])
 def start_server(server_id):
-    """Start a Minecraft server using GitHub Actions only"""
+    """Start a Minecraft server using GitHub Actions"""
     load_server_configs()
     
     if server_id not in servers:
@@ -499,56 +499,19 @@ def start_server(server_id):
         return redirect(url_for('index'))
     
     server_config = servers[server_id]
-    server_name = server_config.get('name', 'Unnamed Server')
     server_type = server_config.get('type', 'vanilla')
+    server_name = server_config.get('name', 'Unnamed Server')
+    
+    # Use the workflow file directly in .github/workflows directory
+    workflow_file = f"{server_type}_server.yml"
     
     try:
-        # 1. Create the workflow file in the main workflows directory
-        workflow_name = f"server_{server_id}.yml"
-        workflow_path = os.path.join(".github", "workflows", workflow_name)
+        logger.info(f"Starting server {server_id} using GitHub Actions")
         
-        # Check if we need to create/update the workflow file
-        if not os.path.exists(workflow_path):
-            logger.info(f"Creating new workflow file for {server_name}")
-            
-            # Use the template as a starting point
-            template_path = os.path.join(".github", "workflows", "server_templates", f"{server_type}_server.yml")
-            
-            if not os.path.exists(template_path):
-                flash(f'Template for {server_type} servers not found', 'error')
-                return redirect(url_for('view_server', server_id=server_id))
-                
-            # Copy template to specific server workflow
-            with open(template_path, 'r') as src, open(workflow_path, 'w') as dst:
-                content = src.read()
-                # Ensure the name is distinctive
-                content = content.replace(f"{server_type.capitalize()} Minecraft Server", f"MC Server - {server_name}")
-                dst.write(content)
-            
-            # Commit the new workflow file
-            try:
-                # Set Git identity
-                subprocess.run(['git', 'config', 'user.email', 'minecraft-server@github.com'], check=True)
-                subprocess.run(['git', 'config', 'user.name', 'Minecraft Server Manager'], check=True)
-                
-                # Add and commit
-                subprocess.run(['git', 'add', workflow_path], check=True)
-                subprocess.run(['git', 'commit', '-m', f"Add workflow for {server_name} [skip ci]"], check=True)
-                
-                # Push (without token in URL for security)
-                subprocess.run(['git', 'push'], check=True)
-                
-                logger.info(f"Committed and pushed workflow file {workflow_path}")
-            except Exception as e:
-                logger.warning(f"Could not commit workflow file: {e}")
-                # We'll continue anyway and try using the local file
-        
-        # 2. Dispatch the workflow run
-        api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_name}/dispatches"
-        
+        # Use the GitHub API to dispatch the workflow
         headers = {
             'Authorization': f"token {GITHUB_TOKEN}",
-            'Accept': 'application/vnd.github.v3+json'
+            'Accept': 'application/vnd.github+json'
         }
         
         # Prepare inputs for the workflow
@@ -559,30 +522,37 @@ def start_server(server_id):
             'memory': server_config.get('memory', '2G'),
             'difficulty': server_config.get('difficulty', 'normal'),
             'gamemode': server_config.get('gamemode', 'survival'),
-            'seed': server_config.get('seed', ''),
-            'max_runtime': str(server_config.get('max_runtime', 350)),
-            'backup_interval': str(server_config.get('backup_interval', 6))
+            'seed': server_config.get('seed', '')
         }
         
+        # Optional inputs
+        if 'max_runtime' in server_config:
+            inputs['max_runtime'] = str(server_config['max_runtime'])
+        if 'backup_interval' in server_config:
+            inputs['backup_interval'] = str(server_config['backup_interval'])
+        
         data = {
-            'ref': 'main',
+            'ref': 'main',  # Use the main branch
             'inputs': inputs
         }
         
-        logger.info(f"Dispatching workflow: {workflow_name} with inputs: {inputs}")
+        # Build the API URL for the workflow file directly in .github/workflows
+        api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
+        
+        logger.info(f"Dispatching workflow: {workflow_file} with inputs: {inputs}")
         response = requests.post(api_url, headers=headers, json=data)
         
         if response.status_code == 204:
-            # Success!
-            servers[server_id]['is_active'] = True
-            servers[server_id]['last_started'] = time.time()
-            save_server_config(server_id, servers[server_id])
-            
+            # Success - update server status
+            server_config['is_active'] = True
+            server_config['last_started'] = time.time()
+            save_server_config(server_id, server_config)
             flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
         else:
-            logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-            flash(f'Failed to start server in GitHub: {response.status_code}', 'error')
-    
+            error_text = response.text
+            logger.error(f"GitHub API error: {response.status_code} - {error_text}")
+            flash(f'Failed to start server: {response.status_code}. {error_text}', 'error')
+            
     except Exception as e:
         logger.error(f"Error starting server {server_id}: {e}")
         logger.error(traceback.format_exc())
