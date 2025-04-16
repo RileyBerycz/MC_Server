@@ -3,21 +3,54 @@ name: Bedrock Minecraft Server
 on:
   workflow_dispatch:
     inputs:
+      server_id:
+        description: 'Server ID'
+        required: true
+      server_name:
+        description: 'Server Name'
+        required: true
       max_players:
         description: 'Maximum number of players'
         default: '20'
         required: true
+      difficulty:
+        description: 'Game difficulty'
+        default: 'normal'
+        required: false
+      gamemode:
+        description: 'Game mode'
+        default: 'survival'
+        required: false
+      seed:
+        description: 'World seed'
+        required: false
+      max_runtime:
+        description: 'Maximum runtime in minutes'
+        default: '350'
+        required: false
+      backup_interval:
+        description: 'Backup interval in hours'
+        default: '6'
+        required: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.max_runtime) }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Create server directory
-        run: mkdir -p server
+        run: mkdir -p server/${{ inputs.server_id }}
+
+      - name: Download previous world data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: server/${{ inputs.server_id }}
 
       - name: Install cloudflared
         run: |
@@ -26,34 +59,69 @@ jobs:
 
       - name: Download Bedrock Server
         run: |
-          # Download the exact version specified in SERVER_TYPES
-          curl -o bedrock-server.zip "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.10.01.zip"
-          unzip bedrock-server.zip -d bedrock-server
-          chmod +x bedrock-server/bedrock_server
+          cd server/${{ inputs.server_id }}
+          # Download only if necessary
+          if [ ! -f "bedrock_server" ]; then
+            # Download the latest Bedrock server
+            curl -o bedrock-server.zip "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.41.01.zip"
+            unzip -o bedrock-server.zip
+            chmod +x bedrock_server
+            rm bedrock-server.zip
+          fi
         continue-on-error: false
 
       - name: Setup server properties
         run: |
-          cd bedrock-server
+          cd server/${{ inputs.server_id }}
+          # Update server.properties for Bedrock
           if [ -f "server.properties" ]; then
-            sed -i "s/max-players=.*/max-players=${{ github.event.inputs.max_players }}/" server.properties
+            sed -i "s/max-players=.*/max-players=${{ inputs.max_players }}/" server.properties
+            sed -i "s/difficulty=.*/difficulty=${{ inputs.difficulty }}/" server.properties
+            sed -i "s/gamemode=.*/gamemode=${{ inputs.gamemode }}/" server.properties
+            if [ ! -z "${{ inputs.seed }}" ]; then
+              sed -i "s/level-seed=.*/level-seed=${{ inputs.seed }}/" server.properties
+            fi
           else
-            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
+            cat > server.properties << EOF
+            server-name=${{ inputs.server_name }}
+            gamemode=${{ inputs.gamemode }}
+            difficulty=${{ inputs.difficulty }}
+            max-players=${{ inputs.max_players }}
+            ${inputs.seed:+level-seed=${{ inputs.seed }}}
+            allow-cheats=true
+            EOF
           fi
 
       - name: Start Cloudflared tunnel
         run: |
-          cd bedrock-server
-          cloudflared tunnel --url tcp://localhost:19132 > tunnel.log 2>&1 &
+          cd server/${{ inputs.server_id }}
+          cloudflared tunnel --url udp://localhost:19132 > tunnel.log 2>&1 &
           echo "Waiting for tunnel to establish..."
           sleep 10
           # Extract and display tunnel URL
-          grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          grep -o 'udp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          # Save the tunnel URL to a status file
+          TUNNEL_URL=$(grep -o 'udp://.*\.trycloudflare.com' tunnel.log || echo "")
+          if [ ! -z "$TUNNEL_URL" ]; then
+            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
+          fi
           cat tunnel.log
 
       - name: Start Bedrock Server
         run: |
-          cd bedrock-server
+          cd server/${{ inputs.server_id }}
           LD_LIBRARY_PATH=. ./bedrock_server
         env:
-          MAX_PLAYERS: ${{ github.event.inputs.max_players }}
+          MAX_PLAYERS: ${{ inputs.max_players }}
+
+      - name: Save world data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: |
+            server/${{ inputs.server_id }}/worlds
+            server/${{ inputs.server_id }}/server.properties
+            server/${{ inputs.server_id }}/permissions.json
+            server/${{ inputs.server_id }}/whitelist.json
+          retention-days: 7

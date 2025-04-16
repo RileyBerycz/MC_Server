@@ -498,69 +498,50 @@ def start_server(server_id):
         if use_github:
             logger.info(f"Starting server {server_id} using GitHub Actions")
             
-            # First, ensure the workflow file exists and is pushed to GitHub
-            workflow_file = f"server_{server_id}.yml"
-            workflow_path = os.path.join(".github", "workflows", workflow_file)
+            # Use the template workflow file based on server type
+            workflow_file = f"{server_type}_server.yml"
+            workflow_path = os.path.join(".github", "workflows", "server_templates", workflow_file)
             
-            # Check if file exists locally
-            if os.path.exists(workflow_path):
-                logger.info(f"Found server-specific workflow: {workflow_path}")
-                
-                # First, try to commit and push the workflow file
-                try:
-                    # Configure git identity
-                    subprocess.run(['git', 'config', '--global', 'user.email', 'minecraft-admin@github.com'])
-                    subprocess.run(['git', 'config', '--global', 'user.name', 'Minecraft Admin'])
-                    
-                    # Add and commit the file
-                    subprocess.run(['git', 'add', workflow_path])
-                    subprocess.run(['git', 'commit', '-m', f"Ensure workflow file exists for {server_name} [skip ci]"])
-                    
-                    # Push to GitHub using PAT
-                    env = os.environ.copy()
-                    env['GIT_ASKPASS'] = 'echo'
-                    env['GIT_PASSWORD'] = GITHUB_TOKEN
-                    subprocess.run(['git', 'push'], env=env)
-                    
-                    logger.info("Successfully pushed workflow file to GitHub")
-                except Exception as e:
-                    logger.warning(f"Could not push workflow file: {e}")
-                
-                # Use the proper API endpoint with full path reference
-                api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
-                
-                headers = {
-                    'Authorization': f"Bearer {GITHUB_TOKEN}",
-                    'Accept': 'application/vnd.github.v3+json'
+            # Check if template exists
+            if not os.path.exists(workflow_path):
+                logger.warning(f"Template workflow file {workflow_path} not found")
+                flash(f'Server template for {server_type} not found. Creating local server.', 'warning')
+                local_start(server_id, server_config)
+                return redirect(url_for('view_server', server_id=server_id))
+            
+            # Use the proper API endpoint with template file path
+            api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/server_templates/{workflow_file}/dispatches"
+            
+            headers = {
+                'Authorization': f"Bearer {GITHUB_TOKEN}",
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            # Prepare inputs for the workflow
+            data = {
+                'ref': 'main',  # Use your branch name here
+                'inputs': {
+                    'server_id': server_id,
+                    'server_name': server_name,
+                    'max_players': str(server_config.get('max_players', 20)),
+                    'memory': server_config.get('memory', '2G')
                 }
+            }
+            
+            logger.info(f"Dispatching template workflow: {workflow_file} with inputs: {data['inputs']}")
+            response = requests.post(api_url, headers=headers, json=data)
+            
+            if response.status_code == 204:
+                # Success!
+                servers[server_id]['is_active'] = True
+                servers[server_id]['last_started'] = time.time()
+                save_server_config(server_id, servers[server_id])
                 
-                data = {
-                    'ref': 'main',  # Use your branch name here
-                    'inputs': {
-                        'memory': server_config.get('memory', '2G'),
-                        'max_players': str(server_config.get('max_players', 20)),
-                        'max_runtime': str(server_config.get('max_runtime', 350)),
-                        'backup_interval': str(server_config.get('backup_interval', 6))
-                    }
-                }
-                
-                logger.info(f"Dispatching workflow: {workflow_file} with inputs: {data['inputs']}")
-                response = requests.post(api_url, headers=headers, json=data)
-                
-                if response.status_code == 204:
-                    # Success!
-                    servers[server_id]['is_active'] = True
-                    servers[server_id]['last_started'] = time.time()
-                    save_server_config(server_id, servers[server_id])
-                    
-                    flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
-                    return redirect(url_for('view_server', server_id=server_id))
-                else:
-                    logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                    flash(f'Failed to start server in GitHub: {response.status_code}. Trying local server.', 'warning')
+                flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
+                return redirect(url_for('view_server', server_id=server_id))
             else:
-                logger.warning(f"Workflow file {workflow_path} not found")
-                flash('Server workflow file not found. Creating local server.', 'warning')
+                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
+                flash(f'Failed to start server in GitHub: {response.status_code}. Starting local server.', 'warning')
         
         # Fall back to local server launch
         local_start(server_id, server_config)
@@ -571,7 +552,7 @@ def start_server(server_id):
         logger.error(traceback.format_exc())
         flash(f'Error starting server: {str(e)}', 'error')
         
-        # Always try local as last resort
+        # Try local as last resort
         try:
             local_start(server_id, server_config)
         except Exception as local_error:

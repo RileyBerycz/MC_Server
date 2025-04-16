@@ -3,6 +3,12 @@ name: Fabric Minecraft Server
 on:
   workflow_dispatch:
     inputs:
+      server_id:
+        description: 'Server ID'
+        required: true
+      server_name:
+        description: 'Server Name'
+        required: true
       max_players:
         description: 'Maximum number of players'
         default: '20'
@@ -11,10 +17,30 @@ on:
         description: 'Memory allocation for the server (e.g., 2G, 4G)'
         default: '2G'
         required: true
+      difficulty:
+        description: 'Game difficulty'
+        default: 'normal'
+        required: false
+      gamemode:
+        description: 'Game mode'
+        default: 'survival'
+        required: false
+      seed:
+        description: 'World seed'
+        required: false
+      max_runtime:
+        description: 'Maximum runtime in minutes'
+        default: '350'
+        required: false
+      backup_interval:
+        description: 'Backup interval in hours'
+        default: '6'
+        required: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.max_runtime) }}
 
     steps:
       - name: Checkout repository
@@ -27,50 +53,90 @@ jobs:
           java-version: '17'
 
       - name: Create server directory
-        run: mkdir -p server
+        run: mkdir -p server/${{ inputs.server_id }}
+
+      - name: Download previous world data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: server/${{ inputs.server_id }}
 
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-      - name: Download Fabric
+      - name: Setup Fabric Server
         run: |
-          # Download the exact version specified in SERVER_TYPES
-          curl -o fabric-installer.jar "https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.14.21/fabric-installer-0.14.21.jar"
-          # Create EULA file
-          echo "eula=true" > eula.txt
-          # Install Fabric server
-          java -jar fabric-installer.jar server -downloadMinecraft
+          cd server/${{ inputs.server_id }}
+          if [ ! -f "server.jar" ] && [ ! -f "fabric-server-launch.jar" ]; then
+            # Download Fabric installer
+            curl -o fabric-installer.jar "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.0/fabric-installer-1.1.0.jar"
+            # Create EULA file
+            echo "eula=true" > eula.txt
+            # Install Fabric server (using latest Minecraft version)
+            java -jar fabric-installer.jar server -mcversion 1.21.4 -downloadMinecraft
+          fi
         continue-on-error: false
 
       - name: Setup server files
         run: |
-          # Create server.properties if it doesn't exist
-          if [ ! -f "server.properties" ]; then
-            echo "Creating default server.properties"
-            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
-            echo "server-port=25565" >> server.properties
-          fi
+          cd server/${{ inputs.server_id }}
+          # Create or update server.properties
+          cat > server.properties << EOF
+          max-players=${{ inputs.max_players }}
+          server-port=25565
+          difficulty=${{ inputs.difficulty }}
+          gamemode=${{ inputs.gamemode }}
+          ${inputs.seed:+level-seed=${{ inputs.seed }}}
+          enable-command-block=true
+          spawn-protection=0
+          EOF
 
       - name: Start Cloudflared tunnel
         run: |
+          cd server/${{ inputs.server_id }}
           cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
           echo "Waiting for tunnel to establish..."
           sleep 10
           # Extract and display tunnel URL
           grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          # Save the tunnel URL to a status file
+          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
+          if [ ! -z "$TUNNEL_URL" ]; then
+            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
+          fi
           cat tunnel.log
 
       - name: Start Fabric Server
         run: |
+          cd server/${{ inputs.server_id }}
           # Find the fabric server launcher
-          FABRIC_SERVER_LAUNCHER=$(find . -name "fabric-server-launch.jar" -type f)
-          if [ -z "$FABRIC_SERVER_LAUNCHER" ]; then
+          if [ -f "fabric-server-launch.jar" ]; then
+            java -Xmx${{ inputs.memory }} -Xms${{ inputs.memory }} -jar fabric-server-launch.jar nogui
+          elif [ -f "server.jar" ]; then
+            java -Xmx${{ inputs.memory }} -Xms${{ inputs.memory }} -jar server.jar nogui
+          else
             echo "Error: Fabric server launcher not found!"
             exit 1
           fi
-          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -jar "$FABRIC_SERVER_LAUNCHER" nogui
         env:
           EULA: 'TRUE'
-          MAX_PLAYERS: ${{ github.event.inputs.max_players }}
+          MAX_PLAYERS: ${{ inputs.max_players }}
+
+      - name: Save world data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: |
+            server/${{ inputs.server_id }}/world
+            server/${{ inputs.server_id }}/server.properties
+            server/${{ inputs.server_id }}/config
+            server/${{ inputs.server_id }}/mods
+            server/${{ inputs.server_id }}/ops.json
+            server/${{ inputs.server_id }}/whitelist.json
+            server/${{ inputs.server_id }}/banned-players.json
+            server/${{ inputs.server_id }}/banned-ips.json
+          retention-days: 7

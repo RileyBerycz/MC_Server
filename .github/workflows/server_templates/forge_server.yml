@@ -3,6 +3,12 @@ name: Forge Minecraft Server
 on:
   workflow_dispatch:
     inputs:
+      server_id:
+        description: 'Server ID'
+        required: true
+      server_name:
+        description: 'Server Name'
+        required: true
       max_players:
         description: 'Maximum number of players'
         default: '20'
@@ -11,10 +17,30 @@ on:
         description: 'Memory allocation for the server (e.g., 2G, 4G)'
         default: '2G'
         required: true
+      difficulty:
+        description: 'Game difficulty'
+        default: 'normal'
+        required: false
+      gamemode:
+        description: 'Game mode'
+        default: 'survival'
+        required: false
+      seed:
+        description: 'World seed'
+        required: false
+      max_runtime:
+        description: 'Maximum runtime in minutes'
+        default: '350'
+        required: false
+      backup_interval:
+        description: 'Backup interval in hours'
+        default: '6'
+        required: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.max_runtime) }}
 
     steps:
       - name: Checkout repository
@@ -27,49 +53,97 @@ jobs:
           java-version: '17'
 
       - name: Create server directory
-        run: mkdir -p server
+        run: mkdir -p server/${{ inputs.server_id }}
+
+      - name: Download previous world data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: server/${{ inputs.server_id }}
 
       - name: Install cloudflared
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-      - name: Download Forge
+      - name: Setup Forge Server
         run: |
-          curl -o forge-installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-48.0.6/forge-1.21.1-48.0.6-installer.jar"
-          # Create EULA file
-          echo "eula=true" > eula.txt
-          java -jar forge-installer.jar --installServer
+          cd server/${{ inputs.server_id }}
+          if [ ! -f "server.jar" ]; then
+            # Download Forge installer
+            curl -o forge-installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.4-49.0.11/forge-1.21.4-49.0.11-installer.jar"
+            # Create EULA file
+            echo "eula=true" > eula.txt
+            # Install Forge server
+            java -jar forge-installer.jar --installServer
+            # Find the forge server jar
+            FORGE_JAR=$(find . -name "forge-1.21.4-49.0.11*.jar" -type f)
+            if [ ! -z "$FORGE_JAR" ]; then
+              echo "Using Forge JAR: $FORGE_JAR"
+              ln -sf "$FORGE_JAR" server.jar
+            else
+              echo "Error: Forge JAR not found after installation"
+              exit 1
+            fi
+          fi
         continue-on-error: false
 
       - name: Setup server files
         run: |
-          # Create server.properties if it doesn't exist
-          if [ ! -f "server.properties" ]; then
-            echo "Creating default server.properties"
-            echo "max-players=${{ github.event.inputs.max_players }}" > server.properties
-            echo "server-port=25565" >> server.properties
-          fi
+          cd server/${{ inputs.server_id }}
+          # Create or update server.properties
+          cat > server.properties << EOF
+          max-players=${{ inputs.max_players }}
+          server-port=25565
+          difficulty=${{ inputs.difficulty }}
+          gamemode=${{ inputs.gamemode }}
+          ${inputs.seed:+level-seed=${{ inputs.seed }}}
+          enable-command-block=true
+          spawn-protection=0
+          EOF
 
       - name: Start Cloudflared tunnel
         run: |
+          cd server/${{ inputs.server_id }}
           cloudflared tunnel --url tcp://localhost:25565 > tunnel.log 2>&1 &
           echo "Waiting for tunnel to establish..."
           sleep 10
           # Extract and display tunnel URL
           grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "Failed to establish tunnel"
+          # Save the tunnel URL to a status file
+          TUNNEL_URL=$(grep -o 'tcp://.*\.trycloudflare.com' tunnel.log || echo "")
+          if [ ! -z "$TUNNEL_URL" ]; then
+            echo "{\"address\":\"$TUNNEL_URL\",\"running\":true,\"timestamp\":$(date +%s)}" > status.json
+          fi
           cat tunnel.log
 
       - name: Start Forge Server
         run: |
-          # Use the correct JAR file name that matches the downloaded version
-          FORGE_JAR=$(find . -name "forge-1.21.1-48.0.6*.jar" -type f)
-          if [ -z "$FORGE_JAR" ]; then
-            echo "Error: Forge JAR not found!"
-            exit 1
+          cd server/${{ inputs.server_id }}
+          # Check if there's a run script or use server.jar directly
+          if [ -f "run.sh" ]; then
+            chmod +x run.sh
+            ./run.sh
+          else
+            java -Xmx${{ inputs.memory }} -Xms${{ inputs.memory }} -XX:+UseG1GC -jar server.jar nogui
           fi
-          echo "Starting Forge server with JAR: $FORGE_JAR"
-          java -Xmx${{ github.event.inputs.memory }} -Xms${{ github.event.inputs.memory }} -XX:+UseG1GC -jar "$FORGE_JAR" nogui
         env:
           EULA: 'TRUE'
-          MAX_PLAYERS: ${{ github.event.inputs.max_players }}
+          MAX_PLAYERS: ${{ inputs.max_players }}
+
+      - name: Save world data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-data-${{ inputs.server_id }}
+          path: |
+            server/${{ inputs.server_id }}/world
+            server/${{ inputs.server_id }}/server.properties
+            server/${{ inputs.server_id }}/config
+            server/${{ inputs.server_id }}/mods
+            server/${{ inputs.server_id }}/ops.json
+            server/${{ inputs.server_id }}/whitelist.json
+            server/${{ inputs.server_id }}/banned-players.json
+            server/${{ inputs.server_id }}/banned-ips.json
+          retention-days: 7
