@@ -626,13 +626,22 @@ def main():
     print("REPO_OWNER:", REPO_OWNER)
     print("REPO_NAME:", REPO_NAME)
     
-    # Create required directories
-    os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
-    os.makedirs("servers", exist_ok=True)  # Main server directory
-    os.makedirs(".github/workflows", exist_ok=True)  # Ensure workflows directory exists
-    os.makedirs(UPLOADS_DIR, exist_ok=True)
-    os.makedirs("admin_panel/templates", exist_ok=True)
-    os.makedirs("admin_panel/static/css", exist_ok=True)
+    # Create required directories with proper error handling
+    for directory in [SERVER_CONFIGS_DIR, "servers", ".github/workflows", 
+                     ".github/workflows/server_templates", UPLOADS_DIR, 
+                     "admin_panel/templates", "admin_panel/static/css"]:
+        try:
+            # Check if path exists and is not a directory
+            if os.path.exists(directory) and not os.path.isdir(directory):
+                # Rename the existing file
+                os.rename(directory, f"{directory}.bak")
+                print(f"Renamed existing file '{directory}' to '{directory}.bak'")
+            
+            # Now create the directory
+            os.makedirs(directory, exist_ok=True)
+            print(f"Directory created/verified: {directory}")
+        except Exception as e:
+            print(f"Warning: Issue with directory '{directory}': {e}")
     
     # Load server configurations
     load_server_configs()
