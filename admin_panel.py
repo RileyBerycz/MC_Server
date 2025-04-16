@@ -94,7 +94,7 @@ def load_server_configs():
                         if 'type' not in config:
                             config['type'] = 'vanilla'
                         servers[server_id] = config
-                        logger.info(f"Loaded server config for {config['name']} ({server_id})")
+                        logger.info(f"Loaded server config for {config.get('name', 'Unnamed')} ({server_id})")
                 except Exception as e:
                     logger.error(f"Error loading server config {filename}: {e}")
     
@@ -496,82 +496,61 @@ def start_server(server_id):
         use_github = GITHUB_TOKEN and REPO_OWNER and REPO_NAME
         
         if use_github:
-            logger.info(f"Starting server {server_id} using GitHub Actions workflow")
+            logger.info(f"Starting server {server_id} using GitHub Actions")
             
-            # Use server-specific workflow file if it exists, otherwise use template
-            server_workflow_path = f".github/workflows/server_{server_id}.yml"
-            template_workflow_path = f".github/workflows/server_templates/{server_type}_server.yml"
-            
-            workflow_exists = False
+            # First, ensure the workflow file exists and is pushed to GitHub
             workflow_file = f"server_{server_id}.yml"
+            workflow_path = os.path.join(".github", "workflows", workflow_file)
             
-            # First check if server-specific workflow exists
-            if os.path.exists(server_workflow_path):
-                workflow_exists = True
-                logger.info(f"Found server-specific workflow: {server_workflow_path}")
-            # If not, check if we need to copy from template
-            elif os.path.exists(template_workflow_path):
-                logger.info(f"Using template workflow: {template_workflow_path}")
-                # Copy template to server-specific workflow
-                os.makedirs(os.path.dirname(server_workflow_path), exist_ok=True)
-                with open(template_workflow_path, 'r') as src, open(server_workflow_path, 'w') as dst:
-                    content = src.read()
-                    # Update workflow name to match server
-                    content = content.replace("name: Vanilla Minecraft Server", f"name: MC Server - {server_name}")
-                    content = content.replace("name: Paper Minecraft Server", f"name: MC Server - {server_name}")
-                    content = content.replace("name: Forge Minecraft Server", f"name: MC Server - {server_name}")
-                    content = content.replace("name: Fabric Minecraft Server", f"name: MC Server - {server_name}")
-                    dst.write(content)
-                workflow_exists = True
+            # Check if file exists locally
+            if os.path.exists(workflow_path):
+                logger.info(f"Found server-specific workflow: {workflow_path}")
                 
-                # Try to commit the new workflow file
+                # First, try to commit and push the workflow file
                 try:
-                    # Set Git identity first
-                    subprocess.run(['git', 'config', 'user.email', 'minecraft-admin@github.com'], check=True)
-                    subprocess.run(['git', 'config', 'user.name', 'Minecraft Admin'], check=True)
+                    # Configure git identity
+                    subprocess.run(['git', 'config', '--global', 'user.email', 'minecraft-admin@github.com'])
+                    subprocess.run(['git', 'config', '--global', 'user.name', 'Minecraft Admin'])
                     
                     # Add and commit the file
-                    subprocess.run(['git', 'add', server_workflow_path], check=True)
-                    subprocess.run(['git', 'commit', '-m', f"Add workflow for server {server_name} [skip ci]"], check=True)
+                    subprocess.run(['git', 'add', workflow_path])
+                    subprocess.run(['git', 'commit', '-m', f"Ensure workflow file exists for {server_name} [skip ci]"])
                     
-                    # Push using the GITHUB_TOKEN
-                    remote_url = f"https://{GITHUB_TOKEN}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
-                    subprocess.run(['git', 'push', remote_url], check=True)
-                    logger.info(f"Successfully pushed workflow file {server_workflow_path} to GitHub")
+                    # Push to GitHub using PAT
+                    env = os.environ.copy()
+                    env['GIT_ASKPASS'] = 'echo'
+                    env['GIT_PASSWORD'] = GITHUB_TOKEN
+                    subprocess.run(['git', 'push'], env=env)
+                    
+                    logger.info("Successfully pushed workflow file to GitHub")
                 except Exception as e:
-                    logger.warning(f"Could not commit workflow file: {e}")
-                    # Continue anyway - we'll try to use the file locally
-            
-            if workflow_exists:
-                # Prepare inputs for the workflow dispatch
-                inputs = {
-                    'memory': server_config.get('memory', '2G'),
-                    'max_players': str(server_config.get('max_players', 20)),
-                    'max_runtime': str(server_config.get('max_runtime', 350)),
-                    'backup_interval': str(server_config.get('backup_interval', 6))
-                }
+                    logger.warning(f"Could not push workflow file: {e}")
                 
-                # Build the API URL for workflow dispatch
+                # Use the proper API endpoint with full path reference
                 api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
                 
                 headers = {
-                    'Authorization': f"token {GITHUB_TOKEN}",
+                    'Authorization': f"Bearer {GITHUB_TOKEN}",
                     'Accept': 'application/vnd.github.v3+json'
                 }
                 
                 data = {
-                    'ref': 'main',  # Use the main branch
-                    'inputs': inputs
+                    'ref': 'main',  # Use your branch name here
+                    'inputs': {
+                        'memory': server_config.get('memory', '2G'),
+                        'max_players': str(server_config.get('max_players', 20)),
+                        'max_runtime': str(server_config.get('max_runtime', 350)),
+                        'backup_interval': str(server_config.get('backup_interval', 6))
+                    }
                 }
                 
-                logger.info(f"Dispatching workflow: {workflow_file} with inputs: {inputs}")
+                logger.info(f"Dispatching workflow: {workflow_file} with inputs: {data['inputs']}")
                 response = requests.post(api_url, headers=headers, json=data)
                 
                 if response.status_code == 204:
-                    # Update server status in memory and in configuration file
+                    # Success!
                     servers[server_id]['is_active'] = True
                     servers[server_id]['last_started'] = time.time()
-                    servers[server_id]['workflow_name'] = workflow_file
                     save_server_config(server_id, servers[server_id])
                     
                     flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
@@ -579,6 +558,9 @@ def start_server(server_id):
                 else:
                     logger.error(f"GitHub API error: {response.status_code} - {response.text}")
                     flash(f'Failed to start server in GitHub: {response.status_code}. Trying local server.', 'warning')
+            else:
+                logger.warning(f"Workflow file {workflow_path} not found")
+                flash('Server workflow file not found. Creating local server.', 'warning')
         
         # Fall back to local server launch
         local_start(server_id, server_config)
@@ -592,8 +574,8 @@ def start_server(server_id):
         # Always try local as last resort
         try:
             local_start(server_id, server_config)
-        except:
-            pass
+        except Exception as local_error:
+            logger.error(f"Local server start also failed: {local_error}")
         
         return redirect(url_for('view_server', server_id=server_id))
 
@@ -865,15 +847,14 @@ def shutdown_server_route():
         # Save each server configuration
         for server_id, server_config in servers.items():
             try:
-                # Make sure to update the state of each server before saving
+                # Update the server state before saving
                 if server_manager and server_id in server_manager.servers:
-                    server_status = server_manager.get_server_status(server_id)
-                    server_config['is_active'] = server_status['running']
-                    server_config['address'] = server_status['address']
+                    status = server_manager.get_server_status(server_id)
+                    server_config['is_active'] = status.get('running', False)
                 
                 save_server_config(server_id, server_config)
             except Exception as e:
-                logger.error(f"Error saving server config {server_id} during shutdown: {e}")
+                logger.error(f"Error saving server config {server_id}: {e}")
         
         # Create a marker file that signals workflow should end
         with open("SHUTDOWN_REQUESTED", "w") as f:
@@ -896,7 +877,6 @@ def shutdown_server_route():
         return response
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
-        logger.error(traceback.format_exc())
         flash(f'Error during shutdown: {e}', 'error')
         return redirect(url_for('index'))
 
