@@ -1,5 +1,17 @@
 name: Vanilla Minecraft Server
-
+# Java minecraft server (vanilla) workflow
+# This workflow deploys a vanilla Minecraft server using GitHub Actions.
+# It allows for customization of server settings and includes a backup mechanism.
+# The server is run in a Cloudflare tunnel for secure access.
+# The workflow is triggered manually with input parameters for server configuration.
+# The server is set up with a specified amount of memory, maximum players, and other settings.
+# The server properties are configured, and the server is started with the specified settings.
+# The server's world data is saved as an artifact for future use.
+# The workflow also includes error handling and logging for troubleshooting.
+# The server is set to run for a maximum specified time, after which it will be terminated.
+# The workflow is designed to be reusable and can be customized for different server configurations.
+# The server is set to run in a specific directory, and previous world data is downloaded if available.
+# The server is set up with a specific game mode, difficulty, and other settings.
 on:
   workflow_dispatch:
     inputs:
