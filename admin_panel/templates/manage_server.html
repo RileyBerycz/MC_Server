@@ -53,6 +53,31 @@
         </div>
         {% endif %}
         
+        {% if server.is_active %}
+        <div class="github-status">
+            <h3>GitHub Runner Status</h3>
+            <div class="status-card">
+                <p>Server is running on GitHub Actions</p>
+                <a href="https://github.com/{{ REPO_OWNER }}/{{ REPO_NAME }}/actions" target="_blank" class="btn">View GitHub Workflows</a>
+            </div>
+            {% if server.address %}
+                <div class="connection-card">
+                    <h3>Server Address</h3>
+                    <div class="address-box">
+                        <code>{{ server.address }}</code>
+                        <button class="copy-btn" onclick="copyToClipboard('{{ server.address }}')">Copy</button>
+                    </div>
+                    <p class="connection-instructions">
+                        <strong>How to connect:</strong> Open Minecraft, click "Multiplayer", then "Add Server" and paste this address
+                    </p>
+                </div>
+            {% else %}
+                <p>Server is starting... Connection address will appear here shortly.</p>
+                <button class="btn" onclick="location.reload()">Refresh Status</button>
+            {% endif %}
+        </div>
+        {% endif %}
+        
         <div class="server-actions">
             {% if server.is_active %}
                 <form action="{{ url_for('stop_server', server_id=server_id) }}" method="post">
