@@ -264,6 +264,7 @@ def update_servers_status(server_id, status, extra=None):
     commit_and_push(status_file, f"Update status for {server_id}")
 
 def load_server_config(server_id):
+    pull_latest()  # Always pull latest before reading config
     config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server_configs', f'{server_id}.json'))
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
@@ -328,3 +329,4 @@ if __name__ == "__main__":
             update_servers_status(server_id, "stopped")
             
         sys.exit(0)
+
