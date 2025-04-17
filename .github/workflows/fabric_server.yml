@@ -37,8 +37,7 @@ jobs:
             java -jar fabric-installer.jar server -mcversion 1.21.4 -downloadMinecraft
           fi
 
-      - name: Copy server_helper.py
-        run: cp server_helper.py .
+
 
       - name: Initialize server (generate files only)
         run: python3 -u server_helper.py ${{ inputs.server_id }} fabric true
