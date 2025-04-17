@@ -647,8 +647,16 @@ def download_server_jar(server_id):
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
     """Shutdown the admin panel and exit the process."""
-    with open("SHUTDOWN_REQUESTED", "w") as f:
-        f.write("Shutdown requested at " + str(datetime.datetime.now()))
+    # Restore README
+    readme_path = "README.md"
+    backup_readme_path = "README.md.bak"
+    if os.path.exists(backup_readme_path):
+        with open(backup_readme_path, "r") as f:
+            original_content = f.read()
+        with open(readme_path, "w") as f:
+            f.write(original_content)
+        commit_and_push(readme_path, "Restore README after admin panel shutdown")
+        os.remove(backup_readme_path)
     func = request.environ.get('werkzeug.server.shutdown')
     if func:
         func()
@@ -685,6 +693,15 @@ def main():
             print(f"Directory created/verified: {directory}")
         except Exception as e:
             print(f"Warning: Issue with directory '{directory}': {e}")
+    
+    # Backup the original README if not already backed up
+    readme_path = "README.md"
+    backup_readme_path = "README.md.bak"
+    if os.path.exists(readme_path) and not os.path.exists(backup_readme_path):
+        with open(readme_path, "r") as f:
+            original_content = f.read()
+        with open(backup_readme_path, "w") as f:
+            f.write(original_content)
     
     # Load server configurations
     load_server_configs()

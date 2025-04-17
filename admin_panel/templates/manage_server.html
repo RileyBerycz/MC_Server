@@ -85,7 +85,9 @@
                 </form>
             {% else %}
                 <form action="{{ url_for('start_server', server_id=server_id) }}" method="post">
-                    <button type="submit" class="btn btn-primary">Start Server</button>
+                    <button class="btn btn-primary" {% if server.is_active %}disabled{% endif %}>
+                      Start Server
+                    </button>
                 </form>
             {% endif %}
             
@@ -193,4 +195,3 @@
     </script>
 </body>
 </html>
-``` 

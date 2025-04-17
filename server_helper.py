@@ -222,17 +222,20 @@ def setup_cloudflared_tunnel():
     return tunnel_url, tunnel_process
 
 def write_status_file(server_id, tunnel_url, running=True):
-    """Write status.json with server info and update servers_status.json"""
-    status = {
-        "address": tunnel_url,
-        "running": running,
-        "timestamp": int(time.time())
-    }
-    with open(f"servers/{server_id}/status.json", "w") as f:
-        json.dump(status, f)
-    print(f"Status file written: {status}")
-    # Also update servers_status.json with address and status
-    update_servers_status(server_id, "running" if running else "stopped", extra={"address": tunnel_url})
+    """Update the server config with running status and address."""
+    config_path = os.path.join('server_configs', f'{server_id}.json')
+    if not os.path.exists(config_path):
+        print(f"Config file not found: {config_path}")
+        return False
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    config['is_active'] = running
+    config['tunnel_url'] = tunnel_url
+    config['last_started' if running else 'last_stopped'] = int(time.time())
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"Updated config for {server_id}: is_active={running}, tunnel_url={tunnel_url}")
+    commit_and_push(config_path, f"Update running status for {server_id}")
     return True
 
 def pull_latest():
