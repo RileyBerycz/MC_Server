@@ -1,0 +1,14 @@
+{
+  "name": "Vanilla Test 2",
+  "type": "vanilla",
+  "max_players": 20,
+  "difficulty": "normal",
+  "gamemode": "survival",
+  "seed": "",
+  "memory": "2048M",
+  "is_active": false,
+  "created_at": 1744851153.1937394,
+  "last_started": 0,
+  "max_runtime": 350,
+  "backup_interval": 6.0
+}
