@@ -39,7 +39,12 @@ jobs:
         run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
 
       - name: Initialize server (generate files only)
-        run: python3 -u server_helper.py ${{ inputs.server_id }} vanilla true
+        run: |
+          if [ -d servers/${{ inputs.server_id }} ] && [ "$(ls -A servers/${{ inputs.server_id }})" ]; then
+            echo "Server folder already exists and is not empty, skipping initialization."
+            exit 0
+          fi
+          python3 -u server_helper.py ${{ inputs.server_id }} vanilla true
 
       - name: Commit generated files
         run: |
@@ -54,4 +59,14 @@ jobs:
       - name: Start server and tunnel
         run: |
           python3 -u server_helper.py ${{ inputs.server_id }} vanilla
-        # This will run continuously until the workflow times out or is canceled
+
+      - name: Commit world and server data
+        if: always()
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add servers/${{ inputs.server_id }}
+          git commit -m "Save world and server data for ${{ inputs.server_id }}" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

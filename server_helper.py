@@ -223,7 +223,8 @@ def setup_cloudflared_tunnel():
 
 def write_status_file(server_id, tunnel_url, running=True):
     """Update the server config with running status and address."""
-    config_path = os.path.join('server_configs', f'{server_id}.json')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file not found: {config_path}")
         return False
@@ -231,12 +232,22 @@ def write_status_file(server_id, tunnel_url, running=True):
         config = json.load(f)
     config['is_active'] = running
     config['tunnel_url'] = tunnel_url
-    config['last_started' if running else 'last_stopped'] = int(time.time())
+    if running:
+        config['last_started'] = int(time.time())
+    else:
+        config['last_stopped'] = int(time.time())
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
     print(f"Updated config for {server_id}: is_active={running}, tunnel_url={tunnel_url}")
     commit_and_push(config_path, f"Update running status for {server_id}")
     return True
+
+def set_server_inactive_on_exit(server_id, tunnel_url):
+    """Set is_active to False in config on exit."""
+    try:
+        write_status_file(server_id, tunnel_url, running=False)
+    except Exception as e:
+        print(f"Failed to set server inactive on exit: {e}")
 
 def pull_latest():
     """Pull the latest changes from the remote repository."""
@@ -268,7 +279,8 @@ def update_servers_status(server_id, status, extra=None):
 
 def load_server_config(server_id):
     pull_latest()  # Always pull latest before reading config
-    config_path = os.path.abspath(os.path.join('server_configs', f'{server_id}.json'))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
         return None
@@ -276,6 +288,7 @@ def load_server_config(server_id):
         return json.load(f)
 
 if __name__ == "__main__":
+    pull_latest()  # Always pull latest before doing anything
     if len(sys.argv) < 3:
         print("Usage: server_helper.py <server_id> <server_type> [initialize_only]")
         sys.exit(1)
@@ -294,11 +307,13 @@ if __name__ == "__main__":
     # Start server (initialize only or keep running)
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
+        set_server_inactive_on_exit(server_id, tunnel_url)
         sys.exit(0 if success else 1)
     else:
         server_process = start_server(server_id, server_type)
         if not server_process:
             print("Failed to start server")
+            set_server_inactive_on_exit(server_id, tunnel_url)
             sys.exit(1)
         
         # Set up Cloudflare tunnel
@@ -307,29 +322,31 @@ if __name__ == "__main__":
             if not tunnel_url:
                 print("Failed to set up Cloudflare tunnel")
                 server_process.terminate()
+                set_server_inactive_on_exit(server_id, tunnel_url)
                 sys.exit(1)
         
-        # Write status.json
-        write_status_file(server_id, tunnel_url)
+        # Mark as running
+        write_status_file(server_id, tunnel_url, running=True)
         
-        # Keep running until interrupted
+        # Ensure we mark as inactive on any exit
+        import atexit
+        atexit.register(set_server_inactive_on_exit, server_id, tunnel_url)
+
         try:
             print("Server is running. Press Ctrl+C to stop.", flush=True)
             while True:
-                time.sleep(30)  # Check every 30 seconds instead of every second
+                time.sleep(30)
                 if server_process.poll() is not None:
                     print(f"Server process ended with code: {server_process.returncode}", flush=True)
                     break
-                # Periodically report status to keep logs active
                 print(f"Server still running. Last timestamp: {time.time()}", flush=True)
-                # Also update the status.json file to keep timestamp current
-                write_status_file(server_id, tunnel_url)
+                write_status_file(server_id, tunnel_url, running=True)
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
             server_process.terminate()
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
-            update_servers_status(server_id, "stopped")
-            
+        finally:
+            set_server_inactive_on_exit(server_id, tunnel_url)
         sys.exit(0)
 

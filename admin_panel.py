@@ -381,37 +381,37 @@ def update_readme_with_url(url):
         f.write(content)
     commit_and_push(readme_path, "Update Admin Panel URL in README")
 
+def fix_stale_server_status():
+    """Set is_active=False for any server with no active workflow."""
+    load_server_configs()
+    active_workflows = get_active_github_workflows()
+    active_server_ids = {w['server_id'] for w in active_workflows if w['server_id']}
+    changed = False
+
+    for server_id, config in servers.items():
+        if config.get('is_active', False) and server_id not in active_server_ids:
+            config['is_active'] = False
+            save_server_config(server_id, config)
+            changed = True
+
+    if changed:
+        commit_and_push([os.path.join(SERVER_CONFIGS_DIR, f"{sid}.json") for sid in servers], "Auto-fix stale server status")
+
 @app.route('/')
 def index():
-    """Main page that lists all servers"""
     load_server_configs()
     current_year = datetime.datetime.now().year
-
-    # Update server status based on active workflows
     active_workflows = get_active_github_workflows()
+    active_server_ids = {w.get('server_id') for w in active_workflows}
     for server_id, server in servers.items():
-        # Check if the server has an active workflow
-        is_active = any(w.get('server_id') == server_id for w in active_workflows)
-        if is_active:
-            server['is_active'] = True
-            server['status'] = 'starting'
-        else:
-            # Get the current status
-            status_info = check_server_status(server_id)
-            server['status'] = status_info['status'] 
-            server['is_active'] = server['status'] == 'online'
-
-    # Pass servers_status to the template!
-    servers_status = load_servers_status()
-
+        server['is_active'] = server_id in active_server_ids or server.get('is_active', False)
     return render_template(
         'dashboard.html',
         servers=servers,
         active_workflows=active_workflows,
         current_year=current_year,
         REPO_OWNER=REPO_OWNER,
-        REPO_NAME=REPO_NAME,
-        servers_status=servers_status 
+        REPO_NAME=REPO_NAME
     )
 
 @app.route('/create-server', methods=['GET', 'POST'])
@@ -480,15 +480,13 @@ def create_server():
 
 @app.route('/server/<server_id>')
 def view_server(server_id):
-    """View a specific server's details"""
     load_server_configs()
-    
     if server_id not in servers:
         flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
-    
     server = servers[server_id]
-    
+    active_workflows = get_active_github_workflows()
+    server['is_active'] = any(w.get('server_id') == server_id for w in active_workflows) or server.get('is_active', False)
     # Check status in status.json file
     status_info = check_server_status(server_id)
     server['status'] = status_info['status']
@@ -705,6 +703,7 @@ def main():
     
     # Load server configurations
     load_server_configs()
+    fix_stale_server_status()
     
     # Set up both tunnels for public access
     tunnel_urls = setup_tunnels(admin_port)
