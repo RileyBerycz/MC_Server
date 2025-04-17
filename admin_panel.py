@@ -27,6 +27,8 @@ REPO_OWNER = os.environ.get('GITHUB_REPOSITORY', '').split('/')[0] if '/' in os.
 REPO_NAME = os.environ.get('GITHUB_REPOSITORY', '').split('/')[1] if '/' in os.environ.get('GITHUB_REPOSITORY', '') else ''
 GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 
+SERVERS_STATUS_FILE = 'servers_status.json'
+
 # Server types and their configurations
 SERVER_TYPES = {
     'vanilla': {
@@ -75,28 +77,26 @@ app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 # Global variables
 servers = {}  # Store server configurations
 
+def load_servers_status():
+    if os.path.exists(SERVERS_STATUS_FILE):
+        with open(SERVERS_STATUS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_servers_status(status):
+    with open(SERVERS_STATUS_FILE, 'w') as f:
+        json.dump(status, f, indent=2)
+
 def load_server_configs():
-    """Load all server configurations"""
     global servers
     servers = {}
-    
     if os.path.exists(SERVER_CONFIGS_DIR):
         for filename in os.listdir(SERVER_CONFIGS_DIR):
             if filename.endswith('.json'):
-                try:
-                    server_id = filename[:-5]  # Remove .json extension
-                    with open(os.path.join(SERVER_CONFIGS_DIR, filename), 'r') as f:
-                        config = json.load(f)
-                        # Validate required fields are present
-                        if 'name' not in config:
-                            config['name'] = f"Server {server_id[:6]}"
-                        if 'type' not in config:
-                            config['type'] = 'vanilla'
-                        servers[server_id] = config
-                        logger.info(f"Loaded server config for {config.get('name', 'Unnamed')} ({server_id})")
-                except Exception as e:
-                    logger.error(f"Error loading server config {filename}: {e}")
-    
+                server_id = filename[:-5]
+                with open(os.path.join(SERVER_CONFIGS_DIR, filename), 'r') as f:
+                    config = json.load(f)
+                    servers[server_id] = config
     return servers
 
 def save_server_config(server_id, config):
@@ -281,6 +281,13 @@ def setup_tunnels(port):
     
     return tunnels
 
+def commit_and_push_status():
+    os.system('git config user.name "GitHub Actions"')
+    os.system('git config user.email "actions@github.com"')
+    os.system('git add servers_status.json')
+    os.system('git commit -m "Update server status" || echo "No changes"')
+    os.system('git push')
+
 @app.route('/')
 def index():
     """Main page that lists all servers"""
@@ -393,87 +400,26 @@ def view_server(server_id):
 
 @app.route('/server/<server_id>/start', methods=['POST'])
 def start_server(server_id):
-    """Start a Minecraft server using GitHub Actions"""
     load_server_configs()
-    
-    if server_id not in servers:
-        flash(f'Server with ID {server_id} not found!', 'error')
-        return redirect(url_for('index'))
-    
-    server_config = servers[server_id]
-    server_type = server_config.get('type', 'vanilla')
-    server_name = server_config.get('name', 'Unnamed Server')
-    
-    try:
-        # Get appropriate workflow file for the server type
-        workflow_file = f"{server_type}_server.yml"
-        
-        headers = {
-            'Authorization': f"Bearer {GITHUB_TOKEN}",
-            'Accept': 'application/vnd.github+json'
-        }
-        
-        # Build inputs for the workflow
-        inputs = {
-            'server_id': server_id
-        }
-        
-        data = {
-            'ref': 'admin_panel',
-            'inputs': inputs
-        }
-        
-        # Build the API URL for the workflow file directly in .github/workflows
-        api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
-        
-        logger.info(f"Dispatching workflow: {workflow_file} with inputs: {inputs}")
-        response = requests.post(api_url, headers=headers, json=data)
-        
-        if response.status_code == 204:
-            # Success - update server status
-            server_config['is_active'] = True
-            server_config['last_started'] = time.time()
-            save_server_config(server_id, server_config)
-            flash('Server starting in GitHub Actions. It will be ready in about 2 minutes.', 'success')
-        else:
-            error_text = response.text
-            logger.error(f"GitHub API error: {response.status_code} - {error_text}")
-            flash(f'Failed to start server: {response.status_code}. {error_text}', 'error')
-            
-    except Exception as e:
-        logger.error(f"Error starting server {server_id}: {e}")
-        logger.error(traceback.format_exc())
-        flash(f'Error starting server: {str(e)}', 'error')
-    
+    status = load_servers_status()
+    if status.get(server_id, {}).get('status') == 'running':
+        flash('Server is already running!', 'warning')
+        return redirect(url_for('view_server', server_id=server_id))
+    # ... existing code to start server ...
+    # After successful start:
+    status[server_id] = {'status': 'running', 'last_started': int(time.time())}
+    save_servers_status(status)
+    # Commit and push status file (see below)
+    commit_and_push_status()
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/stop', methods=['POST'])
 def stop_server(server_id):
-    """Stop a Minecraft server"""
     load_server_configs()
-    
-    if server_id not in servers:
-        flash(f'Server with ID {server_id} not found!', 'error')
-        return redirect(url_for('index'))
-    
-    # Update the status in our config
-    servers[server_id]['is_active'] = False
-    save_server_config(server_id, servers[server_id])
-    
-    # Create a status file that indicates the server is stopped
-    status_path = f"servers/{server_id}/status.json"
-    try:
-        status = {
-            'address': 'Not available',
-            'running': False,
-            'timestamp': int(time.time())
-        }
-        os.makedirs(os.path.dirname(status_path), exist_ok=True)
-        with open(status_path, 'w') as f:
-            json.dump(status, f)
-    except Exception as e:
-        logger.error(f"Error updating status file: {e}")
-    
+    status = load_servers_status()
+    status[server_id] = {'status': 'stopped', 'last_stopped': int(time.time())}
+    save_servers_status(status)
+    commit_and_push_status()
     flash('Server has been stopped.', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 

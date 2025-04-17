@@ -37,15 +37,11 @@ jobs:
             java -jar fabric-installer.jar server -mcversion 1.21.4 -downloadMinecraft
           fi
 
-      - name: Create server_helper.py
-        run: |
-          cat > server_helper.py << 'EOF'
-          # Insert the server_helper.py code here - too large to include in this example
-          EOF
-          chmod +x server_helper.py
+      - name: Copy server_helper.py
+        run: cp server_helper.py .
 
       - name: Initialize server (generate files only)
-        run: python server_helper.py ${{ inputs.server_id }} fabric true
+        run: python3 -u server_helper.py ${{ inputs.server_id }} fabric true
 
       - name: Commit generated files
         run: |
@@ -59,5 +55,5 @@ jobs:
 
       - name: Start server and tunnel
         run: |
-          python server_helper.py ${{ inputs.server_id }} fabric
+          python3 -u server_helper.py ${{ inputs.server_id }} fabric
         # This will run continuously until the workflow times out or is canceled

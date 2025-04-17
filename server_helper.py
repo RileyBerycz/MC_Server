@@ -235,6 +235,35 @@ def write_status_file(server_id, tunnel_url, running=True):
     print(f"Status file written: {status}")
     return True
 
+def update_servers_status(server_id, status, extra=None):
+    """Update the global servers_status.json file in the repo root."""
+    status_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'servers_status.json'))
+    try:
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                all_status = json.load(f)
+        else:
+            all_status = {}
+    except Exception:
+        all_status = {}
+    entry = {
+        "status": status,
+        "timestamp": int(time.time())
+    }
+    if extra:
+        entry.update(extra)
+    all_status[server_id] = entry
+    with open(status_file, 'w') as f:
+        json.dump(all_status, f, indent=2)
+    print(f"Updated servers_status.json for {server_id}: {entry}", flush=True)
+    # Commit and push if running in GitHub Actions
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        os.system('git config user.name "GitHub Actions"')
+        os.system('git config user.email "actions@github.com"')
+        os.system('git add ../servers_status.json')
+        os.system('git commit -m "Update status for {}" || echo "No changes"'.format(server_id))
+        os.system('git push')
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: server_helper.py <server_id> <server_type> [initialize_only]")
@@ -280,5 +309,6 @@ if __name__ == "__main__":
             print("Stopping server and tunnel", flush=True)
             server_process.terminate()
             tunnel_process.terminate()
+            update_servers_status(server_id, "stopped")
             
         sys.exit(0)
