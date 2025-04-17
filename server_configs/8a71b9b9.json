@@ -1,0 +1,16 @@
+{
+  "name": "Test",
+  "type": "vanilla",
+  "max_players": 20,
+  "difficulty": "normal",
+  "gamemode": "survival",
+  "seed": "",
+  "memory": "2048M",
+  "is_active": false,
+  "created_at": 1744903476.5779462,
+  "last_started": 0,
+  "max_runtime": 350,
+  "backup_interval": 6.0,
+  "subdomain": "my-test",
+  "tunnel_url": "my-test.rileyberycz.co.uk"
+}
