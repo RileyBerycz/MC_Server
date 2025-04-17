@@ -286,14 +286,26 @@ def create_cloudflare_tunnel(tunnel_name, subdomain):
         )
         print(f"Removed existing DNS record for {subdomain}.rileyberycz.co.uk")
     except subprocess.CalledProcessError:
-        # It's okay if the record didn't exist
         pass
 
     # Route the tunnel to your subdomain
-    subprocess.run(
-        ["cloudflared", "tunnel", "route", "dns", tunnel_name, f"{subdomain}.rileyberycz.co.uk"],
-        check=True
-    )
+    try:
+        subprocess.run(
+            ["cloudflared", "tunnel", "route", "dns", tunnel_name, f"{subdomain}.rileyberycz.co.uk"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode() if hasattr(e.stderr, "decode") else str(e.stderr)
+        if "An A, AAAA, or CNAME record with that host already exists" in stderr:
+            raise Exception(
+                f"Failed to add tunnel route: DNS record for {subdomain}.rileyberycz.co.uk already exists as an A, AAAA, or CNAME record. "
+                "Please remove the conflicting DNS record from your Cloudflare dashboard."
+            )
+        else:
+            raise Exception(f"Failed to add tunnel route: {stderr}")
+
     return tunnel_name, f"{subdomain}.rileyberycz.co.uk"
 
 def delete_cloudflare_tunnel(tunnel_name, subdomain):
@@ -318,12 +330,58 @@ def get_cloudflare_tunnel_count():
     lines = result.stdout.strip().split('\n')
     return max(0, len(lines) - 1)
 
+def cleanup_orphaned_cloudflare_tunnels():
+    """
+    Delete any Cloudflare tunnels that are not referenced in any server config.
+    """
+    print("Checking for orphaned Cloudflare tunnels...", flush=True)
+    # Gather all tunnel names from server configs
+    valid_tunnel_names = set()
+    if os.path.exists(SERVER_CONFIGS_DIR):
+        for filename in os.listdir(SERVER_CONFIGS_DIR):
+            if filename.endswith('.json'):
+                with open(os.path.join(SERVER_CONFIGS_DIR, filename), 'r') as f:
+                    config = json.load(f)
+                    if 'subdomain' in config:
+                        valid_tunnel_names.add(config['subdomain'])
+                    elif 'tunnel_name' in config:
+                        valid_tunnel_names.add(config['tunnel_name'])
+
+    # List all tunnels
+    result = subprocess.run(["cloudflared", "tunnel", "list"], capture_output=True, text=True)
+    lines = result.stdout.strip().split('\n')[1:]  # skip header
+    for line in lines:
+        parts = line.split()
+        if not parts:
+            continue
+        tunnel_name = parts[0]
+        if tunnel_name not in valid_tunnel_names:
+            print(f"Deleting orphaned tunnel: {tunnel_name}", flush=True)
+            try:
+                subprocess.run(["cloudflared", "tunnel", "delete", tunnel_name], check=True)
+                print(f"Deleted tunnel: {tunnel_name}", flush=True)
+            except Exception as e:
+                print(f"Failed to delete tunnel {tunnel_name}: {e}", flush=True)
+
 def update_readme_with_url(url):
     readme_path = "README.md"
-    content = f"# Minecraft Admin Panel\n\n" \
-              f"**Current Admin Panel URL:**\n\n" \
-              f"[{url}]({url})\n\n" \
-              f"_This URL is updated automatically each time the admin panel is started._\n"
+    url_line = f"✨ ADMIN PANEL URL: {url} ✨"
+    pattern = r"✨ ADMIN PANEL URL: .+ ✨"
+
+    # Read the current README
+    if os.path.exists(readme_path):
+        with open(readme_path, "r") as f:
+            content = f.read()
+    else:
+        content = ""
+
+    # Replace or insert the URL line
+    if re.search(pattern, content):
+        content = re.sub(pattern, url_line, content)
+    else:
+        # If not found, append to the end
+        content += f"\n{url_line}\n"
+
     with open(readme_path, "w") as f:
         f.write(content)
     commit_and_push(readme_path, "Update Admin Panel URL in README")
@@ -612,6 +670,9 @@ def main():
     print("GITHUB_TOKEN present:", bool(GITHUB_TOKEN))
     print("REPO_OWNER:", REPO_OWNER)
     print("REPO_NAME:", REPO_NAME)
+    
+    # Clean up orphaned tunnels before anything else
+    cleanup_orphaned_cloudflare_tunnels()
     
     # Create required directories with proper error handling
     for directory in [SERVER_CONFIGS_DIR, "servers", ".github/workflows", 
