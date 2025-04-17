@@ -103,6 +103,10 @@
                 <p><strong>Difficulty:</strong> {{ server.difficulty|capitalize }}</p>
                 <p><strong>Game Mode:</strong> {{ server.gamemode|capitalize }}</p>
                 <p><strong>Memory:</strong> {{ server.memory }}</p>
+                <p>
+                  <strong>Server Tunnel URL:</strong>
+                  <span>{{ server.tunnel_url }}</span>
+                </p>
             </div>
             
             {% if server.type == 'forge' or server.type == 'fabric' %}
@@ -189,3 +193,4 @@
     </script>
 </body>
 </html>
+``` 

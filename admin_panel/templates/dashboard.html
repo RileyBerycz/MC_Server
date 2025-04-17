@@ -155,6 +155,10 @@
                                 <strong>Address:</strong> <code>{{ server.address }}</code>
                             {% endif %}
                         </p>
+                        <p>
+                          <strong>Server Tunnel URL:</strong>
+                          <span>{{ server.tunnel_url }}</span>
+                        </p>
                         
                         <div class="server-actions">
                             <a href="{{ url_for('view_server', server_id=server_id) }}" class="btn">Manage</a>

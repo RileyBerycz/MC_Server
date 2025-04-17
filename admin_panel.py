@@ -332,7 +332,6 @@ def index():
 
 @app.route('/create-server', methods=['GET', 'POST'])
 def create_server():
-    """Create a new server configuration with a random ID"""
     if request.method == 'POST':
         if get_cloudflare_tunnel_count() >= 100:
             flash('Tunnel limit reached (100). Delete a server before creating a new one.', 'error')
@@ -347,10 +346,13 @@ def create_server():
         max_runtime = int(request.form.get('max_runtime', 350))
         backup_interval = float(request.form.get('backup_interval', 6.0))
         custom_subdomain = request.form.get('custom_subdomain', '').strip()
-        
+        subdomain = custom_subdomain if custom_subdomain else server_name.replace(' ', '-')
         # Generate a random ID for this server
         server_id = str(uuid.uuid4())[:8]
-        
+
+        # Create the tunnel and get the full domain
+        tunnel_name, tunnel_url = create_cloudflare_tunnel(subdomain, subdomain)
+
         # Create server configuration
         server_config = {
             'name': server_name,
@@ -365,28 +367,29 @@ def create_server():
             'last_started': 0,
             'max_runtime': max_runtime,
             'backup_interval': backup_interval,
-            'subdomain': custom_subdomain if custom_subdomain else server_name.replace(' ', '-')
+            'subdomain': subdomain,
+            'tunnel_url': tunnel_url  # Store the tunnel URL in the config
         }
-        
+
         # Save the configuration with the random ID
         save_server_config(server_id, server_config)
         servers[server_id] = server_config
-        
+
         # Create server directory if it doesn't exist
         server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
-        
+
         # Optionally, create a README in the server directory
         readme_path = os.path.join(server_dir, "README.md")
         with open(readme_path, "w") as f:
             f.write(f"# {server_name}\n\nServer ID: {server_id}\nType: {server_type}\nCreated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        
+
         # Commit and push config and readme
         commit_and_push([
             os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"),
             readme_path
         ], f"Add new server config for {server_name} ({server_id})")
-        
+
         flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
         return redirect(url_for('index'))
     return render_template('create_server.html', server_types=SERVER_TYPES)

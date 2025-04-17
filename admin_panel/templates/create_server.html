@@ -60,6 +60,11 @@
                 <label for="backup_interval">Backup Interval (hours):</label>
                 <input type="number" id="backup_interval" name="backup_interval" value="6" min="1" max="24" step="0.5" required>
             </div>
+            <div class="mb-3">
+                <label for="custom_subdomain" class="form-label">Custom Subdomain</label>
+                <input type="text" class="form-control" id="custom_subdomain" name="custom_subdomain" placeholder="e.g. my-uhc-server">
+                <div class="form-text">This will be used as the subdomain (e.g. my-uhc-server.rileyberycz.co.uk)</div>
+            </div>
             <button type="submit" class="btn">Create Server</button>
         </form>
         <a href="{{ url_for('index') }}" class="btn">Back to Dashboard</a>

@@ -263,15 +263,30 @@ def update_servers_status(server_id, status, extra=None):
     # Commit and push after editing
     commit_and_push(status_file, f"Update status for {server_id}")
 
+def load_server_config(server_id):
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server_configs', f'{server_id}.json'))
+    if not os.path.exists(config_path):
+        print(f"Server config not found: {config_path}", flush=True)
+        return None
+    with open(config_path, 'r') as f:
+        return json.load(f)
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: server_helper.py <server_id> <server_type> [initialize_only]")
         sys.exit(1)
-    
+
     server_id = sys.argv[1]
     server_type = sys.argv[2]
     initialize_only = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
-    
+
+    # Load config and get tunnel info
+    config = load_server_config(server_id)
+    if not config:
+        print("Could not load server config.")
+        sys.exit(1)
+    tunnel_url = config.get('tunnel_url')
+
     # Start server (initialize only or keep running)
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
@@ -283,11 +298,12 @@ if __name__ == "__main__":
             sys.exit(1)
         
         # Set up Cloudflare tunnel
-        tunnel_url, tunnel_process = setup_cloudflared_tunnel()
         if not tunnel_url:
-            print("Failed to set up Cloudflare tunnel")
-            server_process.terminate()
-            sys.exit(1)
+            tunnel_url, tunnel_process = setup_cloudflared_tunnel()
+            if not tunnel_url:
+                print("Failed to set up Cloudflare tunnel")
+                server_process.terminate()
+                sys.exit(1)
         
         # Write status.json
         write_status_file(server_id, tunnel_url)
@@ -307,7 +323,8 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
             server_process.terminate()
-            tunnel_process.terminate()
+            if 'tunnel_process' in locals():
+                tunnel_process.terminate()
             update_servers_status(server_id, "stopped")
             
         sys.exit(0)

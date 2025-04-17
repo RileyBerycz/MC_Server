@@ -4,7 +4,7 @@ def pull_latest():
     """Pull the latest changes from the remote repository."""
     os.system('git pull --rebase --autostash')
 
-def commit_and_push(files, msg="Update via script"):
+def commit_and_push(files, msg="Update via admin panel"):
     """
     Commit and push specified files to GitHub with a custom message.
     Args:
@@ -18,4 +18,6 @@ def commit_and_push(files, msg="Update via script"):
     for f in files:
         os.system(f'git add "{f}"')
     os.system(f'git commit -m "{msg}" || echo "No changes"')
+    # Always pull before pushing to avoid non-fast-forward errors
+    os.system('git pull --rebase --autostash')
     os.system('git push')
