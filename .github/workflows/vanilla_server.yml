@@ -52,6 +52,7 @@ jobs:
           git config user.email "actions@github.com"
           git add servers/${{ inputs.server_id }}
           git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
+          git pull --rebase --autostash
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -67,6 +68,7 @@ jobs:
           git config user.email "actions@github.com"
           git add servers/${{ inputs.server_id }}
           git commit -m "Save world and server data for ${{ inputs.server_id }}" || echo "No changes"
+          git pull --rebase --autostash
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
