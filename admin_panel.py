@@ -15,6 +15,7 @@ import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
 from pyngrok import ngrok, conf 
+from github_helper import pull_latest, commit_and_push
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 servers = {}  # Store server configurations
 
 def load_servers_status():
+    pull_latest()
     if os.path.exists(SERVERS_STATUS_FILE):
         with open(SERVERS_STATUS_FILE, 'r') as f:
             return json.load(f)
@@ -89,6 +91,7 @@ def save_servers_status(status):
 
 def load_server_configs():
     global servers
+    pull_latest()
     servers = {}
     if os.path.exists(SERVER_CONFIGS_DIR):
         for filename in os.listdir(SERVER_CONFIGS_DIR):
@@ -120,16 +123,16 @@ def save_server_config(server_id, config):
         logger.error(traceback.format_exc())
 
 def check_server_status(server_id):
-    """Check status of server from status.json and workflow status"""
-    status_path = f"servers/{server_id}/status.json"
+    """Check status of server from servers_status.json"""
+    status_path = SERVERS_STATUS_FILE
     try:
         if os.path.exists(status_path):
             with open(status_path, 'r') as f:
-                status = json.load(f)
-            # If status is recent (within last 5 minutes)
-            if time.time() - status.get('timestamp', 0) < 300:
+                all_status = json.load(f)
+            status = all_status.get(server_id, {})
+            if status:
                 return {
-                    'status': 'online' if status.get('running') else 'offline',
+                    'status': status.get('status', 'offline'),
                     'address': status.get('address', 'Not available'),
                     'players': [],
                     'online_players': 0,
@@ -138,20 +141,7 @@ def check_server_status(server_id):
                 }
     except Exception as e:
         logger.error(f"Error checking status for server {server_id}: {e}")
-    
-    # Check active GitHub workflows as fallback
-    active_workflows = get_active_github_workflows()
-    if any(w.get('server_id') == server_id for w in active_workflows):
-        return {
-            'status': 'starting',
-            'address': 'Starting up...',
-            'players': [],
-            'online_players': 0,
-            'version': servers.get(server_id, {}).get('type', 'Unknown'),
-            'timestamp': int(time.time())
-        }
-    
-    # Default status if not found or outdated
+    # Default status if not found
     return {
         'status': 'offline',
         'address': 'Not available',
@@ -272,21 +262,40 @@ def setup_tunnels(port):
     
     return tunnels
 
-def commit_and_push(files, msg="Update via admin panel"):
-    """
-    Commit and push specified files to GitHub with a custom message.
-    Args:
-        files (str or list): File path(s) to add and commit.
-        msg (str): Commit message.
-    """
-    if isinstance(files, str):
-        files = [files]
-    os.system('git config user.name "GitHub Actions"')
-    os.system('git config user.email "actions@github.com"')
-    for f in files:
-        os.system(f'git add "{f}"')
-    os.system(f'git commit -m "{msg}" || echo "No changes"')
-    os.system('git push')
+def create_cloudflare_tunnel(tunnel_name, subdomain):
+    # Check tunnel count before creating
+    if get_cloudflare_tunnel_count() >= 100:
+        raise Exception("Tunnel limit reached (100). Cannot create more tunnels.")
+    # Create the tunnel (if it doesn't exist)
+    result = subprocess.run(
+        ["cloudflared", "tunnel", "create", tunnel_name],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        if "already exists" in result.stderr:
+            print(f"Tunnel {tunnel_name} already exists, continuing.")
+        else:
+            raise Exception(f"Failed to create tunnel: {result.stderr}")
+    # Route the tunnel to your subdomain
+    subprocess.run(
+        ["cloudflared", "tunnel", "route", "dns", tunnel_name, f"{subdomain}.rileyberycz.co.uk"],
+        check=True
+    )
+    return tunnel_name, f"{subdomain}.rileyberycz.co.uk"
+
+def delete_cloudflare_tunnel(tunnel_name):
+    """Delete a named Cloudflare tunnel."""
+    try:
+        subprocess.run(["cloudflared", "tunnel", "delete", tunnel_name], check=True)
+        print(f"Deleted Cloudflare tunnel: {tunnel_name}")
+    except Exception as e:
+        print(f"Error deleting Cloudflare tunnel {tunnel_name}: {e}")
+
+def get_cloudflare_tunnel_count():
+    result = subprocess.run(["cloudflared", "tunnel", "list"], capture_output=True, text=True)
+    # Parse the output to count tunnels (skip header line)
+    lines = result.stdout.strip().split('\n')
+    return max(0, len(lines) - 1)
 
 @app.route('/')
 def index():
@@ -325,6 +334,9 @@ def index():
 def create_server():
     """Create a new server configuration with a random ID"""
     if request.method == 'POST':
+        if get_cloudflare_tunnel_count() >= 100:
+            flash('Tunnel limit reached (100). Delete a server before creating a new one.', 'error')
+            return redirect(url_for('index'))
         server_name = request.form['server_name']
         server_type = request.form['server_type']
         max_players = int(request.form.get('max_players', 20))
@@ -334,6 +346,7 @@ def create_server():
         memory = request.form.get('memory', '')
         max_runtime = int(request.form.get('max_runtime', 350))
         backup_interval = float(request.form.get('backup_interval', 6.0))
+        custom_subdomain = request.form.get('custom_subdomain', '').strip()
         
         # Generate a random ID for this server
         server_id = str(uuid.uuid4())[:8]
@@ -351,7 +364,8 @@ def create_server():
             'created_at': time.time(),
             'last_started': 0,
             'max_runtime': max_runtime,
-            'backup_interval': backup_interval
+            'backup_interval': backup_interval,
+            'subdomain': custom_subdomain if custom_subdomain else server_name.replace(' ', '-')
         }
         
         # Save the configuration with the random ID
@@ -462,6 +476,9 @@ def delete_server(server_id):
         return redirect(url_for('view_server', server_id=server_id))
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     files_to_commit = []
+    tunnel_name = servers[server_id].get('subdomain') or server_id  # Use subdomain as tunnel name
+    # Delete the tunnel before removing config
+    delete_cloudflare_tunnel(tunnel_name)
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)

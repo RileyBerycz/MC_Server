@@ -9,7 +9,7 @@ import re
 import sys
 import signal
 import threading
-
+from github_helper import pull_latest, commit_and_push
 # Ensure unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -222,21 +222,25 @@ def setup_cloudflared_tunnel():
     return tunnel_url, tunnel_process
 
 def write_status_file(server_id, tunnel_url, running=True):
-    """Write status.json with server info"""
+    """Write status.json with server info and update servers_status.json"""
     status = {
         "address": tunnel_url,
         "running": running,
         "timestamp": int(time.time())
     }
-    
     with open(f"servers/{server_id}/status.json", "w") as f:
         json.dump(status, f)
-    
     print(f"Status file written: {status}")
+    # Also update servers_status.json with address and status
+    update_servers_status(server_id, "running" if running else "stopped", extra={"address": tunnel_url})
     return True
 
+def pull_latest():
+    """Pull the latest changes from the remote repository."""
+    os.system('git pull --rebase --autostash')
+
 def update_servers_status(server_id, status, extra=None):
-    """Update the global servers_status.json file in the repo root."""
+    pull_latest()
     status_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'servers_status.json'))
     try:
         if os.path.exists(status_file):
@@ -256,13 +260,8 @@ def update_servers_status(server_id, status, extra=None):
     with open(status_file, 'w') as f:
         json.dump(all_status, f, indent=2)
     print(f"Updated servers_status.json for {server_id}: {entry}", flush=True)
-    # Commit and push if running in GitHub Actions
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        os.system('git config user.name "GitHub Actions"')
-        os.system('git config user.email "actions@github.com"')
-        os.system('git add ../servers_status.json')
-        os.system('git commit -m "Update status for {}" || echo "No changes"'.format(server_id))
-        os.system('git push')
+    # Commit and push after editing
+    commit_and_push(status_file, f"Update status for {server_id}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
