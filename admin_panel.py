@@ -266,6 +266,7 @@ def create_cloudflare_tunnel(tunnel_name, subdomain):
     # Check tunnel count before creating
     if get_cloudflare_tunnel_count() >= 100:
         raise Exception("Tunnel limit reached (100). Cannot create more tunnels.")
+
     # Create the tunnel (if it doesn't exist)
     result = subprocess.run(
         ["cloudflared", "tunnel", "create", tunnel_name],
@@ -276,6 +277,18 @@ def create_cloudflare_tunnel(tunnel_name, subdomain):
             print(f"Tunnel {tunnel_name} already exists, continuing.")
         else:
             raise Exception(f"Failed to create tunnel: {result.stderr}")
+
+    # Remove existing DNS record for the subdomain (if any)
+    try:
+        subprocess.run(
+            ["cloudflared", "tunnel", "route", "dns", "delete", f"{subdomain}.rileyberycz.co.uk"],
+            check=True
+        )
+        print(f"Removed existing DNS record for {subdomain}.rileyberycz.co.uk")
+    except subprocess.CalledProcessError:
+        # It's okay if the record didn't exist
+        pass
+
     # Route the tunnel to your subdomain
     subprocess.run(
         ["cloudflared", "tunnel", "route", "dns", tunnel_name, f"{subdomain}.rileyberycz.co.uk"],
@@ -283,8 +296,16 @@ def create_cloudflare_tunnel(tunnel_name, subdomain):
     )
     return tunnel_name, f"{subdomain}.rileyberycz.co.uk"
 
-def delete_cloudflare_tunnel(tunnel_name):
-    """Delete a named Cloudflare tunnel."""
+def delete_cloudflare_tunnel(tunnel_name, subdomain):
+    """Delete a named Cloudflare tunnel and its DNS route."""
+    try:
+        subprocess.run(
+            ["cloudflared", "tunnel", "route", "dns", "delete", f"{subdomain}.rileyberycz.co.uk"],
+            check=True
+        )
+        print(f"Removed DNS record for {subdomain}.rileyberycz.co.uk")
+    except subprocess.CalledProcessError:
+        pass
     try:
         subprocess.run(["cloudflared", "tunnel", "delete", tunnel_name], check=True)
         print(f"Deleted Cloudflare tunnel: {tunnel_name}")
@@ -296,6 +317,16 @@ def get_cloudflare_tunnel_count():
     # Parse the output to count tunnels (skip header line)
     lines = result.stdout.strip().split('\n')
     return max(0, len(lines) - 1)
+
+def update_readme_with_url(url):
+    readme_path = "README.md"
+    content = f"# Minecraft Admin Panel\n\n" \
+              f"**Current Admin Panel URL:**\n\n" \
+              f"[{url}]({url})\n\n" \
+              f"_This URL is updated automatically each time the admin panel is started._\n"
+    with open(readme_path, "w") as f:
+        f.write(content)
+    commit_and_push(readme_path, "Update Admin Panel URL in README")
 
 @app.route('/')
 def index():
@@ -481,7 +512,7 @@ def delete_server(server_id):
     files_to_commit = []
     tunnel_name = servers[server_id].get('subdomain') or server_id  # Use subdomain as tunnel name
     # Delete the tunnel before removing config
-    delete_cloudflare_tunnel(tunnel_name)
+    delete_cloudflare_tunnel(tunnel_name, servers[server_id].get('subdomain', ''))
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)
@@ -609,6 +640,8 @@ def main():
     if tunnel_urls['cloudflare']:
         print(f"\n✨ ADMIN PANEL via CLOUDFLARE: {tunnel_urls['cloudflare']} ✨")
         print(f"::notice::Admin Panel URL (Cloudflare): {tunnel_urls['cloudflare']}")
+        # Update README with the Cloudflare URL
+        update_readme_with_url(tunnel_urls['cloudflare'])
     else:
         print("\n⚠️ Cloudflare tunnel not established!")
     
