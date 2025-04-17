@@ -265,7 +265,7 @@ def update_servers_status(server_id, status, extra=None):
 
 def load_server_config(server_id):
     pull_latest()  # Always pull latest before reading config
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server_configs', f'{server_id}.json'))
+    config_path = os.path.abspath(os.path.join('server_configs', f'{server_id}.json'))
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
         return None

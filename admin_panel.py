@@ -331,11 +331,7 @@ def get_cloudflare_tunnel_count():
     return max(0, len(lines) - 1)
 
 def cleanup_orphaned_cloudflare_tunnels():
-    """
-    Delete any Cloudflare tunnels that are not referenced in any server config.
-    """
     print("Checking for orphaned Cloudflare tunnels...", flush=True)
-    # Gather all tunnel names from server configs
     valid_tunnel_names = set()
     if os.path.exists(SERVER_CONFIGS_DIR):
         for filename in os.listdir(SERVER_CONFIGS_DIR):
@@ -347,12 +343,11 @@ def cleanup_orphaned_cloudflare_tunnels():
                     elif 'tunnel_name' in config:
                         valid_tunnel_names.add(config['tunnel_name'])
 
-    # List all tunnels
     result = subprocess.run(["cloudflared", "tunnel", "list"], capture_output=True, text=True)
     lines = result.stdout.strip().split('\n')[1:]  # skip header
     for line in lines:
         parts = line.split()
-        if not parts:
+        if not parts or parts[0].lower() in ("id", "name", "delete"):
             continue
         tunnel_name = parts[0]
         if tunnel_name not in valid_tunnel_names:
