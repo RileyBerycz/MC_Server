@@ -77,7 +77,7 @@ jobs:
       - name: Restore cloudflared cert.pem
         run: |
           mkdir -p ~/.cloudflared
-          echo "${{ secrets.CLOUDFLARED_CERT }}" | base64 -d > ~/.cloudflared/cert.pem
+          echo "${{ secrets.CLOUDFLARED_CERT }}" > ~/.cloudflared/cert.pem
 
       - name: Launch admin panel
         run: |
