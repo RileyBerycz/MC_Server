@@ -272,11 +272,20 @@ def setup_tunnels(port):
     
     return tunnels
 
-def commit_and_push_status():
+def commit_and_push(files, msg="Update via admin panel"):
+    """
+    Commit and push specified files to GitHub with a custom message.
+    Args:
+        files (str or list): File path(s) to add and commit.
+        msg (str): Commit message.
+    """
+    if isinstance(files, str):
+        files = [files]
     os.system('git config user.name "GitHub Actions"')
     os.system('git config user.email "actions@github.com"')
-    os.system('git add servers_status.json')
-    os.system('git commit -m "Update server status" || echo "No changes"')
+    for f in files:
+        os.system(f'git add "{f}"')
+    os.system(f'git commit -m "{msg}" || echo "No changes"')
     os.system('git push')
 
 @app.route('/')
@@ -327,7 +336,7 @@ def create_server():
         backup_interval = float(request.form.get('backup_interval', 6.0))
         
         # Generate a random ID for this server
-        server_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID for shorter ID
+        server_id = str(uuid.uuid4())[:8]
         
         # Create server configuration
         server_config = {
@@ -358,9 +367,14 @@ def create_server():
         with open(readme_path, "w") as f:
             f.write(f"# {server_name}\n\nServer ID: {server_id}\nType: {server_type}\nCreated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
+        # Commit and push config and readme
+        commit_and_push([
+            os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"),
+            readme_path
+        ], f"Add new server config for {server_name} ({server_id})")
+        
         flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
         return redirect(url_for('index'))
-        
     return render_template('create_server.html', server_types=SERVER_TYPES)
 
 @app.route('/server/<server_id>')
@@ -402,11 +416,10 @@ def start_server(server_id):
     if status.get(server_id, {}).get('status') == 'running':
         flash('Server is already running!', 'warning')
         return redirect(url_for('view_server', server_id=server_id))
-    # Here you would trigger the GitHub Actions workflow to start the server
-    # After successful start:
+    # Trigger workflow here if needed
     status[server_id] = {'status': 'running', 'last_started': int(time.time())}
     save_servers_status(status)
-    commit_and_push_status()
+    commit_and_push(SERVERS_STATUS_FILE, "Update server status")
     flash('Server is starting...', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
@@ -416,33 +429,32 @@ def stop_server(server_id):
     status = load_servers_status()
     status[server_id] = {'status': 'stopped', 'last_stopped': int(time.time())}
     save_servers_status(status)
-    commit_and_push_status()
+    commit_and_push(SERVERS_STATUS_FILE, "Update server status")
     flash('Server has been stopped.', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/delete', methods=['POST'])
 def delete_server(server_id):
-    """Delete a server configuration"""
     load_server_configs()
-    
     if server_id not in servers:
         flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
-    
-    # Check if server is currently running
     if servers[server_id].get('is_active', False):
         flash('Cannot delete server while it is running. Stop the server first.', 'error')
         return redirect(url_for('view_server', server_id=server_id))
-    
-    # Delete the config file
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    files_to_commit = []
     if os.path.exists(config_path):
         os.remove(config_path)
-    
-    # Remove the server from memory
+        files_to_commit.append(config_path)
+    server_dir = os.path.join("servers", server_id)
+    if os.path.exists(server_dir):
+        import shutil
+        shutil.rmtree(server_dir)
+        files_to_commit.append(server_dir)
     server_name = servers[server_id].get('name', 'Unnamed Server')
     del servers[server_id]
-    
+    commit_and_push(files_to_commit, f"Delete server {server_name} ({server_id})")
     flash(f'Server "{server_name}" has been deleted.', 'success')
     return redirect(url_for('index'))
 
@@ -461,92 +473,53 @@ def send_command(server_id):
 
 @app.route('/server/<server_id>/upload-jar', methods=['POST'])
 def upload_server_jar(server_id):
-    """Upload a custom server JAR file"""
     if 'jar_file' not in request.files:
         flash('No file part', 'error')
         return redirect(url_for('view_server', server_id=server_id))
-    
     file = request.files['jar_file']
     if file.filename == '':
         flash('No selected file', 'error')
         return redirect(url_for('view_server', server_id=server_id))
-    
     if file and file.filename.endswith('.jar'):
         server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
-        
-        # Save the JAR file
         filename = secure_filename(file.filename)
-        file.save(os.path.join(server_dir, filename))
-        
-        # Create a symlink to server.jar for compatibility
-        if filename != 'server.jar':
-            server_jar_path = os.path.join(server_dir, "server.jar")
-            if os.path.exists(server_jar_path):
-                os.remove(server_jar_path)
-            
-            # On Windows, symlinks require admin privileges, so copy instead
-            import shutil
-            shutil.copy2(os.path.join(server_dir, filename), server_jar_path)
-        
+        file_path = os.path.join(server_dir, filename)
+        file.save(file_path)
+        # Commit and push the uploaded JAR
+        commit_and_push(file_path, f"Upload custom JAR for {server_id}")
         flash(f'Server JAR file "{filename}" uploaded successfully', 'success')
     else:
         flash('Invalid file type. Please upload a JAR file.', 'error')
-    
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/download-jar', methods=['POST'])
 def download_server_jar(server_id):
-    """Download a server JAR from a URL"""
     jar_url = request.form.get('jar_url', '')
-    
     if not jar_url:
         flash('Please provide a download URL', 'error')
         return redirect(url_for('view_server', server_id=server_id))
-    
     try:
         server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
-        
-        # Download the JAR file
+        import requests
         response = requests.get(jar_url, stream=True)
         if response.status_code == 200:
-            # Get filename from URL or use default
-            if 'Content-Disposition' in response.headers:
-                content_disposition = response.headers['Content-Disposition']
-                filename = re.findall('filename="(.+)"', content_disposition)[0]
-            else:
-                filename = jar_url.split('/')[-1]
-            
+            filename = jar_url.split('/')[-1]
             if not filename.endswith('.jar'):
                 filename += '.jar'
-            
             filename = secure_filename(filename)
             file_path = os.path.join(server_dir, filename)
-            
-            # Save the file
             with open(file_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-            
-            # Create a symlink to server.jar for compatibility
-            if filename != 'server.jar':
-                server_jar_path = os.path.join(server_dir, "server.jar")
-                if os.path.exists(server_jar_path):
-                    os.remove(server_jar_path)
-                
-                # On Windows, symlinks require admin privileges, so copy instead
-                import shutil
-                shutil.copy2(file_path, server_jar_path)
-            
+            commit_and_push(file_path, f"Download server JAR for {server_id}")
             flash(f'Server JAR file "{filename}" downloaded successfully', 'success')
         else:
             flash(f'Failed to download JAR file: {response.status_code}', 'error')
     except Exception as e:
-        logger.error(f"Error downloading JAR file: {e}")
         flash(f'Error downloading JAR file: {str(e)}', 'error')
-    
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/shutdown', methods=['POST'])

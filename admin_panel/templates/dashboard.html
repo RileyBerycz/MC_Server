@@ -165,7 +165,7 @@
                                 </form>
                             {% else %}
                                 <form action="{{ url_for('start_server', server_id=server_id) }}" method="post">
-                                    <button type="submit" class="btn" {% if servers_status[server_id]['status'] == 'running' %}disabled{% endif %}>
+                                    <button type="submit" class="btn" {% if servers_status.get(server_id, {}).get('status') == 'running' %}disabled{% endif %}>
                                         Start Server
                                     </button>
                                 </form>
