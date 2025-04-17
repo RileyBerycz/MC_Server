@@ -74,6 +74,11 @@ jobs:
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
+      - name: Restore cloudflared cert.pem
+        run: |
+          mkdir -p ~/.cloudflared
+          echo "${{ secrets.CLOUDFLARED_CERT }}" | base64 -d > ~/.cloudflared/cert.pem
+
       - name: Launch admin panel
         run: |
           echo "Starting Minecraft Admin Panel..."
