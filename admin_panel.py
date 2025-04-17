@@ -416,11 +416,29 @@ def start_server(server_id):
     if status.get(server_id, {}).get('status') == 'running':
         flash('Server is already running!', 'warning')
         return redirect(url_for('view_server', server_id=server_id))
-    # Trigger workflow here if needed
-    status[server_id] = {'status': 'running', 'last_started': int(time.time())}
-    save_servers_status(status)
-    commit_and_push(SERVERS_STATUS_FILE, "Update server status")
-    flash('Server is starting...', 'success')
+
+    # Get the server type
+    server_type = servers[server_id]['type']
+    workflow_file = f"{server_type}_server.yml"  # e.g., vanilla_server.yml
+
+    # Trigger the correct workflow
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json'
+    }
+    data = {
+        'ref': 'main',  # or your default branch
+        'inputs': {'server_id': server_id}
+    }
+    api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_file}/dispatches"
+    response = requests.post(api_url, headers=headers, json=data)
+    if response.status_code == 204:
+        status[server_id] = {'status': 'running', 'last_started': int(time.time())}
+        save_servers_status(status)
+        commit_and_push(SERVERS_STATUS_FILE, "Update server status")
+        flash('Server is starting...', 'success')
+    else:
+        flash(f"Failed to start server workflow: {response.text}", 'error')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/stop', methods=['POST'])
@@ -524,12 +542,14 @@ def download_server_jar(server_id):
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():
-    """Shutdown the admin panel"""
-    # Create a flag file to signal the workflow to stop
+    """Shutdown the admin panel and exit the process."""
     with open("SHUTDOWN_REQUESTED", "w") as f:
         f.write("Shutdown requested at " + str(datetime.datetime.now()))
-    
-    # Return a message
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func:
+        func()
+    else:
+        os._exit(0)  # Fallback: force exit if not running with Werkzeug
     return render_template('shutdown.html')
 
 def main():
