@@ -24,6 +24,14 @@
             Status: {% if server.is_active %}Online{% else %}Offline{% endif %}
         </div>
         
+        <h2>{{ server.name }}</h2>
+        Status:
+        {% if server.is_active %}
+          <span class="badge bg-success">Online</span>
+        {% else %}
+          <span class="badge bg-danger">Offline</span>
+        {% endif %}
+        
         {% if server.is_active %}
         <div class="server-address-container">
             <h2>Server Connection Information</h2>

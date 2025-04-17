@@ -396,6 +396,32 @@ def start_server(server_id):
         flash(f"Failed to start server workflow: {response.text}", 'error')
     return redirect(url_for('view_server', server_id=server_id))
 
+@app.route('/server/<server_id>/stop', methods=['POST'])
+def stop_server(server_id):
+    load_server_configs()
+    server_type = servers[server_id]['type']
+    workflow_file = f"{server_type}_server.yml"
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json'
+    }
+    data = {
+        'ref': 'main',
+        'inputs': {'server_id': server_id, 'action': 'stop'}
+    }
+    # You need to implement a stop workflow or handle this in your workflow file.
+    # For now, just mark as inactive:
+    config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        config['is_active'] = False
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+        commit_and_push(config_path, f"Mark server {server_id} as stopped")
+    flash('Server marked as stopped.', 'success')
+    return redirect(url_for('view_server', server_id=server_id))
+
 @app.route('/server/<server_id>/delete', methods=['POST'])
 def delete_server(server_id):
     load_server_configs()

@@ -133,30 +133,17 @@ def start_server(server_id, server_type, initialize_only=False):
     print("Server fully initialized and running")
     return process
 
-def setup_cloudflared_tunnel():
-    print("Setting up Cloudflare tunnel", flush=True)
+def setup_cloudflared_tunnel(tunnel_name):
+    print(f"Setting up Cloudflare named tunnel: {tunnel_name}", flush=True)
     tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", "tcp://localhost:25565"],
+        ["cloudflared", "tunnel", "run", tunnel_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
         bufsize=1
     )
     print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
-    start_time = time.time()
-    tunnel_url = None
-    print("Waiting for tunnel URL...", flush=True)
-    while time.time() - start_time < 30:
-        output = tunnel_process.stdout.readline()
-        print(f"CLOUDFLARED: {output.strip()}", flush=True)
-        match = re.search(r'tcp://[a-zA-Z0-9\-]+\.trycloudflare\.com', output)
-        if match:
-            tunnel_url = match.group(0)
-            print(f"Found tunnel URL: {tunnel_url}", flush=True)
-            break
-    if not tunnel_url:
-        print("Failed to get tunnel URL within timeout", flush=True)
-    return tunnel_url, tunnel_process
+    return tunnel_process
 
 def write_status_file(server_id, tunnel_url, running=True):
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -222,7 +209,8 @@ if __name__ == "__main__":
             sys.exit(1)
 
         if not tunnel_url:
-            tunnel_url, tunnel_process = setup_cloudflared_tunnel()
+            tunnel_name = config.get('subdomain')  # or the actual tunnel name if stored separately
+            tunnel_process = setup_cloudflared_tunnel(tunnel_name)
             if not tunnel_url:
                 print("Failed to set up Cloudflare tunnel")
                 server_process.terminate()

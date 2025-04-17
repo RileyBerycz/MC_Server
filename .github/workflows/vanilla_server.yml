@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -24,6 +26,11 @@ jobs:
         run: |
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
+
+      - name: Set up cloudflared tunnel credentials
+        run: |
+          mkdir -p ~/.cloudflared
+          echo "${{ secrets.CLOUDFLARED_CERT }}" > ~/.cloudflared/tunnel.json
 
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}
