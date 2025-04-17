@@ -1,5 +1,5 @@
 {
-  "name": "Vanilla Test",
+  "name": "Test",
   "type": "vanilla",
   "max_players": 20,
   "difficulty": "normal",
@@ -7,7 +7,7 @@
   "seed": "",
   "memory": "2048M",
   "is_active": false,
-  "created_at": 1744850316.1639867,
+  "created_at": 1744851797.9663498,
   "last_started": 0,
   "max_runtime": 350,
   "backup_interval": 6.0
