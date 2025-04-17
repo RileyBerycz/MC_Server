@@ -26,7 +26,7 @@ The Minecraft Server Admin Panel is a web-based application designed to facilita
    - Wait about 30-60 seconds for the workflow to start
    - In the running workflow logs, look for:
    ```
-   ✨ ADMIN PANEL URL: https://bruce-collar-trainer-cia.trycloudflare.com ✨
+   ✨ ADMIN PANEL URL: https://rv-dealt-understood-toxic.trycloudflare.com ✨
    ```
    - Open this URL in your browser to access the admin panel
 
