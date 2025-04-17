@@ -14,7 +14,7 @@ import requests
 import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, make_response
 from werkzeug.utils import secure_filename
-
+from pyngrok import ngrok, conf 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -121,7 +121,6 @@ def save_server_config(server_id, config):
 
 def check_server_status(server_id):
     """Check status of server from status.json and workflow status"""
-    # Check in servers/ directory instead of server/
     status_path = f"servers/{server_id}/status.json"
     try:
         if os.path.exists(status_path):
@@ -254,15 +253,7 @@ def setup_tunnels(port):
         logger.error(f"Error starting Cloudflare tunnel: {e}")
     
     # Start ngrok Tunnel
-    try:
-        # Install pyngrok if needed
-        try:
-            from pyngrok import ngrok, conf
-        except ImportError:
-            logger.info("Installing pyngrok package...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyngrok"])
-            from pyngrok import ngrok, conf
-        
+    try:     
         # Configure ngrok with auth token if available
         ngrok_token = os.environ.get('NGROK_AUTH_TOKEN')
         if ngrok_token:
@@ -293,27 +284,33 @@ def index():
     """Main page that lists all servers"""
     load_server_configs()
     current_year = datetime.datetime.now().year
-    
+
     # Update server status based on active workflows
     active_workflows = get_active_github_workflows()
     for server_id, server in servers.items():
-        # Check if server is active in workflows
-        is_active_in_workflow = any(w.get('server_id') == server_id for w in active_workflows)
-        if is_active_in_workflow:
+        # Check if the server has an active workflow
+        is_active = any(w.get('server_id') == server_id for w in active_workflows)
+        if is_active:
             server['is_active'] = True
-            server['last_started'] = time.time()
-        
-        # Check status file for updated info
-        status = check_server_status(server_id)
-        server['status'] = status['status']
-        server['address'] = status['address']
-    
-    return render_template('dashboard.html', 
-                           servers=servers, 
-                           active_workflows=active_workflows,
-                           current_year=current_year,
-                           REPO_OWNER=REPO_OWNER,
-                           REPO_NAME=REPO_NAME)
+            server['status'] = 'starting'
+        else:
+            # Get the current status
+            status_info = check_server_status(server_id)
+            server['status'] = status_info['status'] 
+            server['is_active'] = server['status'] == 'online'
+
+    # Pass servers_status to the template!
+    servers_status = load_servers_status()
+
+    return render_template(
+        'dashboard.html',
+        servers=servers,
+        active_workflows=active_workflows,
+        current_year=current_year,
+        REPO_OWNER=REPO_OWNER,
+        REPO_NAME=REPO_NAME,
+        servers_status=servers_status 
+    )
 
 @app.route('/create-server', methods=['GET', 'POST'])
 def create_server():
@@ -405,12 +402,12 @@ def start_server(server_id):
     if status.get(server_id, {}).get('status') == 'running':
         flash('Server is already running!', 'warning')
         return redirect(url_for('view_server', server_id=server_id))
-    # ... existing code to start server ...
+    # Here you would trigger the GitHub Actions workflow to start the server
     # After successful start:
     status[server_id] = {'status': 'running', 'last_started': int(time.time())}
     save_servers_status(status)
-    # Commit and push status file (see below)
     commit_and_push_status()
+    flash('Server is starting...', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/server/<server_id>/stop', methods=['POST'])
