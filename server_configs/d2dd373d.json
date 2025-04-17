@@ -1,0 +1,16 @@
+{
+  "name": "Test",
+  "type": "vanilla",
+  "max_players": 20,
+  "difficulty": "normal",
+  "gamemode": "survival",
+  "seed": "",
+  "memory": "2048M",
+  "is_active": false,
+  "created_at": 1744902996.3756073,
+  "last_started": 0,
+  "max_runtime": 45,
+  "backup_interval": 1.0,
+  "subdomain": "my-uhc",
+  "tunnel_url": "my-uhc.rileyberycz.co.uk"
+}
