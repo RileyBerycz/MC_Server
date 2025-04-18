@@ -92,8 +92,9 @@ jobs:
           ADMIN_PORT: ${{ github.event.inputs.port || '8080' }}
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.MY_PAT }}
-          SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY || 'minecraft-default-secret' }}
           ADMIN_TIMEOUT_MINUTES: ${{ github.event.inputs.timeout || '60' }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           
       - name: Start admin panel tunnel
         run: |
@@ -106,56 +107,3 @@ jobs:
           sleep 10
           cat tunnel.log
 
-      - name: Start game server tunnels (for each server)
-        run: |
-          # For each Minecraft server port (e.g., 25565, 25566)
-          cloudflared tunnel --url tcp://localhost:25565 > game_tunnel1.log 2>&1 &
-          cloudflared tunnel --url tcp://localhost:25566 > game_tunnel2.log 2>&1 &
-          echo "Game server tunnels starting..."
-
-      - name: Extract tunnel URLs
-        run: |
-          sleep 5  # Give tunnels time to establish
-          grep -o 'https://.*\.trycloudflare\.com' admin_tunnel.log > tunnel_url.txt || echo "Admin tunnel not found"
-          grep -o 'tcp://.*\.trycloudflare\.com' game_tunnel1.log > game_tunnel1_url.txt || echo "Game tunnel 1 not found"
-          grep -o 'tcp://.*\.trycloudflare\.com' game_tunnel2.log > game_tunnel2_url.txt || echo "Game tunnel 2 not found"
-          
-          # Extract the admin panel URL
-          ADMIN_URL=$(cat tunnel_url.txt)
-          GAME1_URL=$(cat game_tunnel1_url.txt)
-          GAME2_URL=$(cat game_tunnel2_url.txt)
-          
-          if [ ! -z "$ADMIN_URL" ]; then
-            echo "✨ ADMIN PANEL URL: $ADMIN_URL ✨"
-            echo "::notice::Admin Panel URL: $ADMIN_URL"
-          fi
-          
-          if [ ! -z "$GAME1_URL" ]; then
-            echo "✨ GAME SERVER 1 URL: $GAME1_URL ✨"
-            echo "::notice::Game Server 1: $GAME1_URL"
-          fi
-          
-          if [ ! -z "$GAME2_URL" ]; then
-            echo "✨ GAME SERVER 2 URL: $GAME2_URL ✨"
-            echo "::notice::Game Server 2: $GAME2_URL"
-          fi
-
-      - name: Check for shutdown request
-        id: check_shutdown
-        run: |
-          while true; do
-            if [ -f "SHUTDOWN_REQUESTED" ]; then
-              echo "::set-output name=shutdown::true"
-              echo "Shutdown requested, terminating workflow"
-              exit 0
-            fi
-            sleep 5
-          done
-        continue-on-error: true
-        timeout-minutes: 60
-
-      - name: Start Admin Panel with tmate
-        uses: mxschmitt/action-tmate@v3
-        if: steps.check_shutdown.outputs.shutdown != 'true'
-        with:
-          limit-access-to-actor: true

@@ -16,11 +16,9 @@ from werkzeug.utils import secure_filename
 from pyngrok import ngrok, conf 
 from github_helper import pull_latest, commit_and_push
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Constants
 SERVER_CONFIGS_DIR = 'server_configs'
 UPLOADS_DIR = 'uploads'
 SUBDOMAIN_POOL_FILE = "minecraft_subdomains.json"
@@ -29,7 +27,96 @@ REPO_OWNER = os.environ.get('GITHUB_REPOSITORY', '').split('/')[0] if '/' in os.
 REPO_NAME = os.environ.get('GITHUB_REPOSITORY', '').split('/')[1] if '/' in os.environ.get('GITHUB_REPOSITORY', '') else ''
 GITHUB_API = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 
-# Server types and their configurations
+CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
+CLOUDFLARE_ZONE_ID = os.environ.get("CLOUDFLARE_ZONE_ID")
+CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
+
+def get_cloudflare_headers():
+    return {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+def list_minecraft_cnames():
+    url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records?type=CNAME&per_page=100"
+    resp = requests.get(url, headers=get_cloudflare_headers())
+    resp.raise_for_status()
+    records = resp.json()["result"]
+    return [r for r in records if r["name"].startswith("minecraft-")]
+
+def delete_cname(subdomain):
+    records = list_minecraft_cnames()
+    for r in records:
+        if r["name"] == f"{subdomain}.rileyberycz.co.uk":
+            url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{r['id']}"
+            resp = requests.delete(url, headers=get_cloudflare_headers())
+            resp.raise_for_status()
+            print(f"Deleted CNAME {subdomain}.rileyberycz.co.uk from Cloudflare")
+            return True
+    return False
+
+def get_next_available_minecraft_number():
+    records = list_minecraft_cnames()
+    used_numbers = set()
+    for r in records:
+        match = re.match(r"minecraft-(\d+)\.rileyberycz\.co\.uk", r["name"])
+        if match:
+            used_numbers.add(int(match.group(1)))
+    for i in range(1, 101):
+        if i not in used_numbers:
+            return i
+    raise Exception("All 100 minecraft-XXX subdomains are in use!")
+
+def get_next_free_minecraft_number():
+    records = list_minecraft_cnames()
+    used_numbers = set()
+    for r in records:
+        match = re.match(r"minecraft-(\d{3})\.rileyberycz\.co\.uk", r["name"])
+        if match:
+            used_numbers.add(int(match.group(1)))
+    for i in range(1, 101):
+        if i not in used_numbers:
+            return f"{i:03d}"
+    return None
+
+def create_cname(subdomain, target):
+    url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records"
+    data = {
+        "type": "CNAME",
+        "name": f"{subdomain}.rileyberycz.co.uk",
+        "content": target,
+        "ttl": 120,
+        "proxied": False
+    }
+    resp = requests.post(url, headers=get_cloudflare_headers(), json=data)
+    resp.raise_for_status()
+    print(f"Created CNAME {subdomain}.rileyberycz.co.uk -> {target}")
+    return resp.json()["result"]
+
+def rename_cname_to_number(subdomain):
+    records = list_minecraft_cnames()
+    cname_record = next((r for r in records if r["name"] == f"{subdomain}.rileyberycz.co.uk"), None)
+    if not cname_record:
+        return False
+    next_num = get_next_free_minecraft_number()
+    if not next_num:
+        return False
+    url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{cname_record['id']}"
+    data = {
+        "type": "CNAME",
+        "name": f"minecraft-{next_num}.rileyberycz.co.uk",
+        "content": cname_record["content"],
+        "ttl": 120,
+        "proxied": False
+    }
+    resp = requests.put(url, headers=get_cloudflare_headers(), json=data)
+    resp.raise_for_status()
+    print(f"Renamed CNAME {subdomain} to minecraft-{next_num}")
+    return True
+
+def is_reserved_subdomain(name):
+    return re.fullmatch(r"minecraft-0*\d{1,3}", name) and 1 <= int(name.split('-')[1]) <= 100
+
 SERVER_TYPES = {
     'vanilla': {
         'name': 'Vanilla',
@@ -64,18 +151,16 @@ SERVER_TYPES = {
         'download_url': 'https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.41.01.zip',
         'supports_plugins': False,
         'supports_mods': False,
-        'java_args': ''  # Not using Java
+        'java_args': ''
     }
 }
 
-# Initialize Flask app
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
             static_folder='admin_panel/static')
 app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 
-# Global variables
-servers = {}  # Store server configurations
+servers = {}
 
 def load_subdomain_pool():
     if os.path.exists(SUBDOMAIN_POOL_FILE):
@@ -88,14 +173,12 @@ def save_subdomain_pool(pool):
         json.dump(pool, f, indent=2)
 
 def sanitize_subdomain(name):
-    # Lowercase, replace spaces/underscores with hyphens, remove non-alphanum/hyphen
     base = re.sub(r'[^a-z0-9\-]', '', re.sub(r'[\s_]+', '-', name.lower()))
-    return f"minecraft-{base}"[:63]  # DNS label max length
+    return f"minecraft-{base}"[:63]
 
 def get_next_available_subdomain(custom_name):
     pool = load_subdomain_pool()
     subdomain = sanitize_subdomain(custom_name)
-    # If already used, append a number to make unique
     candidate = subdomain
     i = 2
     while candidate in pool and pool[candidate] == "used":
@@ -317,11 +400,16 @@ def create_server():
         memory = request.form.get('memory', '')
         max_runtime = int(request.form.get('max_runtime', 350))
         backup_interval = float(request.form.get('backup_interval', 6.0))
-        # Use sanitized custom name for subdomain
+        if is_reserved_subdomain(sanitize_subdomain(server_name)):
+            flash('Subdomain names minecraft-001 to minecraft-100 are reserved. Please choose another name.', 'error')
+            return redirect(url_for('create_server'))
+        if get_next_free_minecraft_number() is None:
+            flash('Maximum number of Minecraft subdomains reached. Please delete an old server first.', 'error')
+            return redirect(url_for('create_server'))
         subdomain = get_next_available_subdomain(server_name)
         mark_subdomain_used(subdomain)
         server_id = str(uuid.uuid4())[:8]
-        tunnel_name, tunnel_url = create_cloudflare_tunnel(subdomain, subdomain)
+        tunnel_name, tunnel_cname = create_cloudflare_tunnel(subdomain, subdomain)
         server_config = {
             'name': server_name,
             'type': server_type,
@@ -336,7 +424,7 @@ def create_server():
             'max_runtime': max_runtime,
             'backup_interval': backup_interval,
             'subdomain': subdomain,
-            'tunnel_url': tunnel_url
+            'address': tunnel_cname
         }
         save_server_config(server_id, server_config)
         servers[server_id] = server_config
@@ -369,6 +457,13 @@ def view_server(server_id):
         server['custom_jar_name'] = jar_files[0] if server['has_custom_jar'] else None
     else:
         server['has_custom_jar'] = False
+    config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        server['last_command_response'] = config.get('last_command_response', '')
+    else:
+        server['last_command_response'] = ''
     return render_template('manage_server.html', 
                           server=server,
                           server_id=server_id,
@@ -399,42 +494,45 @@ def start_server(server_id):
 @app.route('/server/<server_id>/stop', methods=['POST'])
 def stop_server(server_id):
     load_server_configs()
-    server_type = servers[server_id]['type']
-    workflow_file = f"{server_type}_server.yml"
-    headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
-        'Accept': 'application/vnd.github.v3+json'
-    }
-    data = {
-        'ref': 'main',
-        'inputs': {'server_id': server_id, 'action': 'stop'}
-    }
-    # You need to implement a stop workflow or handle this in your workflow file.
-    # For now, just mark as inactive:
+    if server_id not in servers:
+        flash(f'Server with ID {server_id} not found!', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
-    if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        config['is_active'] = False
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-        commit_and_push(config_path, f"Mark server {server_id} as stopped")
-    flash('Server marked as stopped.', 'success')
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    config['shutdown_request'] = True
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    commit_and_push(config_path, f"Request shutdown for server {server_id}")
+    flash('Shutdown requested. The server will stop shortly.', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
-@app.route('/server/<server_id>/delete', methods=['POST'])
+@app.route('/server/<server_id>/delete', methods=['POST', 'GET'])
 def delete_server(server_id):
     load_server_configs()
     if server_id not in servers:
         flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
+
+    if request.method == 'GET' and servers[server_id].get('is_active', False):
+        return render_template('confirm_delete.html', server=servers[server_id], server_id=server_id)
+
     if servers[server_id].get('is_active', False):
-        flash('Cannot delete server while it is running. Stop the server first.', 'error')
+        config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        config['shutdown_request'] = True
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+        commit_and_push(config_path, f"Request shutdown for server {server_id}")
+        flash('Shutdown requested. Please wait for the server to stop before deleting.', 'warning')
         return redirect(url_for('view_server', server_id=server_id))
+
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     files_to_commit = []
     subdomain = servers[server_id].get('subdomain')
     if subdomain:
+        rename_cname_to_number(subdomain)
         mark_subdomain_available(subdomain)
     if os.path.exists(config_path):
         os.remove(config_path)
@@ -497,6 +595,26 @@ def download_server_jar(server_id):
             flash(f'Failed to download JAR file: {response.status_code}', 'error')
     except Exception as e:
         flash(f'Error downloading JAR file: {str(e)}', 'error')
+    return redirect(url_for('view_server', server_id=server_id))
+
+@app.route('/server/<server_id>/send-command', methods=['POST'])
+def send_command(server_id):
+    load_server_configs()
+    if server_id not in servers:
+        flash(f'Server with ID {server_id} not found!', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    command = request.form.get('command', '').strip()
+    if not command:
+        flash('No command entered.', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    config['pending_command'] = command
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    commit_and_push(config_path, f"Send command to server {server_id}")
+    flash(f'Command "{command}" sent to server.', 'success')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/shutdown', methods=['POST'])

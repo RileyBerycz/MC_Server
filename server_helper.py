@@ -143,7 +143,6 @@ def setup_cloudflared_tunnel(tunnel_name):
         universal_newlines=True,
         bufsize=1
     )
-    # Print tunnel output in real time for debugging
     def print_tunnel_output():
         for line in iter(tunnel_process.stdout.readline, ''):
             print(f"CLOUDFLARED: {line.strip()}", flush=True)
@@ -151,7 +150,7 @@ def setup_cloudflared_tunnel(tunnel_name):
     print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
     return tunnel_process
 
-def write_status_file(server_id, tunnel_url, running=True):
+def write_status_file(server_id, running=True):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
@@ -160,20 +159,19 @@ def write_status_file(server_id, tunnel_url, running=True):
     with open(config_path, 'r') as f:
         config = json.load(f)
     config['is_active'] = running
-    config['tunnel_url'] = tunnel_url
     if running:
         config['last_started'] = int(time.time())
     else:
         config['last_stopped'] = int(time.time())
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
-    print(f"Updated config for {server_id}: is_active={running}, tunnel_url={tunnel_url}")
+    print(f"Updated config for {server_id}: is_active={running}")
     commit_and_push(config_path, f"Update running status for {server_id}")
     return True
 
-def set_server_inactive_on_exit(server_id, tunnel_url):
+def set_server_inactive_on_exit(server_id):
     try:
-        write_status_file(server_id, tunnel_url, running=False)
+        write_status_file(server_id, running=False)
     except Exception as e:
         print(f"Failed to set server inactive on exit: {e}")
 
@@ -186,6 +184,20 @@ def load_server_config(server_id):
         return None
     with open(config_path, 'r') as f:
         return json.load(f)
+
+def process_pending_command(server_id, server_process):
+    config_path = os.path.join('server_configs', f'{server_id}.json')
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    pending_command = config.get('pending_command')
+    if pending_command:
+        print(f"Processing command: {pending_command}")
+        server_process.stdin.write(pending_command + '\n')
+        server_process.stdin.flush()
+        config['last_command_response'] = f"Sent: {pending_command}"
+        config['pending_command'] = ""
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
 
 if __name__ == "__main__":
     pull_latest()
@@ -201,47 +213,50 @@ if __name__ == "__main__":
     if not config:
         print("Could not load server config.")
         sys.exit(1)
-    tunnel_url = config.get('tunnel_url')
+
+    address = config.get('address')
 
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
-        set_server_inactive_on_exit(server_id, tunnel_url)
+        set_server_inactive_on_exit(server_id)
         sys.exit(0 if success else 1)
     else:
         server_process = start_server(server_id, server_type)
         if not server_process:
             print("Failed to start server")
-            set_server_inactive_on_exit(server_id, tunnel_url)
+            set_server_inactive_on_exit(server_id)
             sys.exit(1)
 
-        if not tunnel_url:
-            tunnel_name = config.get('subdomain')  # or the actual tunnel name if stored separately
-            tunnel_process = setup_cloudflared_tunnel(tunnel_name)
-            if not tunnel_url:
-                print("Failed to set up Cloudflare tunnel")
-                server_process.terminate()
-                set_server_inactive_on_exit(server_id, tunnel_url)
-                sys.exit(1)
+        tunnel_name = config.get('subdomain')
+        tunnel_process = setup_cloudflared_tunnel(tunnel_name)
 
-        write_status_file(server_id, tunnel_url, running=True)
+        write_status_file(server_id, running=True)
 
         import atexit
-        atexit.register(set_server_inactive_on_exit, server_id, tunnel_url)
+        atexit.register(set_server_inactive_on_exit, server_id)
 
         try:
             print("Server is running. Press Ctrl+C to stop.", flush=True)
             while True:
-                time.sleep(30)
-                if server_process.poll() is not None:
-                    print(f"Server process ended with code: {server_process.returncode}", flush=True)
-                    break
-                print(f"Server still running. Last timestamp: {time.time()}", flush=True)
-                write_status_file(server_id, tunnel_url, running=True)
+                time.sleep(5)
+                process_pending_command(server_id, server_process)
+                config_path = os.path.join('server_configs', f'{server_id}.json')
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                    if config.get('shutdown_request'):
+                        print("Shutdown requested via config. Stopping server...", flush=True)
+                        config['shutdown_request'] = False
+                        with open(config_path, 'w') as f:
+                            json.dump(config, f, indent=2)
+                        server_process.stdin.write('stop\n')
+                        server_process.stdin.flush()
+                        break
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
             server_process.terminate()
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
         finally:
-            set_server_inactive_on_exit(server_id, tunnel_url)
+            set_server_inactive_on_exit(server_id)
         sys.exit(0)
