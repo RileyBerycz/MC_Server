@@ -19,11 +19,6 @@
                 {% endif %}
             {% endwith %}
         </div>
-        
-        <div class="status-{% if server.is_active %}online{% else %}offline{% endif %}">
-            Status: {% if server.is_active %}Online{% else %}Offline{% endif %}
-        </div>
-        
         <h2>{{ server.name }}</h2>
         Status:
         {% if server.is_active %}

@@ -135,6 +135,7 @@ def start_server(server_id, server_type, initialize_only=False):
 
 def setup_cloudflared_tunnel(tunnel_name):
     print(f"Setting up Cloudflare named tunnel: {tunnel_name}", flush=True)
+    print(f"Running command: cloudflared tunnel run {tunnel_name}", flush=True)
     tunnel_process = subprocess.Popen(
         ["cloudflared", "tunnel", "run", tunnel_name],
         stdout=subprocess.PIPE,
@@ -142,6 +143,11 @@ def setup_cloudflared_tunnel(tunnel_name):
         universal_newlines=True,
         bufsize=1
     )
+    # Print tunnel output in real time for debugging
+    def print_tunnel_output():
+        for line in iter(tunnel_process.stdout.readline, ''):
+            print(f"CLOUDFLARED: {line.strip()}", flush=True)
+    threading.Thread(target=print_tunnel_output, daemon=True).start()
     print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
     return tunnel_process
 
