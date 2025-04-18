@@ -1,0 +1,16 @@
+{
+  "name": "my-uhc",
+  "type": "vanilla",
+  "max_players": 20,
+  "difficulty": "normal",
+  "gamemode": "survival",
+  "seed": "",
+  "memory": "8G",
+  "is_active": false,
+  "created_at": 1744971827.7038167,
+  "last_started": 0,
+  "max_runtime": 45,
+  "backup_interval": 1.0,
+  "subdomain": "minecraft-my-uhc",
+  "tunnel_url": "minecraft-my-uhc.rileyberycz.co.uk"
+}
