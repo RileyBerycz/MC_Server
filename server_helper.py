@@ -13,6 +13,9 @@ from github_helper import pull_latest, commit_and_push
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
+# Set BASE_DIR once, before any os.chdir
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def start_server(server_id, server_type, initialize_only=False):
     print(f"Starting {server_type} server for {server_id}")
     server_dir = f"servers/{server_id}"
@@ -161,7 +164,6 @@ def setup_cloudflared_tunnel(tunnel_name):
     return tunnel_process
 
 def write_status_file(server_id, running=True):
-    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file not found: {config_path}")
@@ -187,7 +189,6 @@ def set_server_inactive_on_exit(server_id):
 
 def load_server_config(server_id):
     pull_latest()
-    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
@@ -196,7 +197,6 @@ def load_server_config(server_id):
         return json.load(f)
 
 def process_pending_command(server_id, server_process):
-    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file {config_path} missing. Stopping server gracefully.")
@@ -262,7 +262,6 @@ if __name__ == "__main__":
                 if not process_pending_command(server_id, server_process):
                     print("Config missing, server stopped.")
                     break
-                BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
                 config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as f:

@@ -184,21 +184,20 @@
               </div>
             </div>
             
-            {% if server.is_active %}
-                <div class="card">
-                    <h3>Send Command</h3>
-                    <form action="{{ url_for('send_command', server_id=server_id) }}" method="post">
-                        <input type="text" name="command" placeholder="Enter server command..." required>
-                        <button type="submit" class="btn">Send</button>
-                    </form>
-                    {% if server.last_command_response %}
-                        <div class="command-response" style="margin-top: 1em;">
-                            <strong>Last Command Response:</strong>
-                            <pre>{{ server.last_command_response }}</pre>
-                        </div>
-                    {% endif %}
-                </div>
-            {% endif %}
+            <!-- Command Form: Always visible -->
+            <div class="card">
+                <h3>Send Command</h3>
+                <form action="{{ url_for('send_command', server_id=server_id) }}" method="post">
+                    <input type="text" name="command" placeholder="Enter server command..." required>
+                    <button type="submit" class="btn">Send</button>
+                </form>
+                {% if server.last_command_response %}
+                    <div class="command-response" style="margin-top: 1em;">
+                        <strong>Last Command Response:</strong>
+                        <pre>{{ server.last_command_response }}</pre>
+                    </div>
+                {% endif %}
+            </div>
             
             {% if not server.is_active %}
             <div class="card">
@@ -244,3 +243,4 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
+``` 
