@@ -10,6 +10,7 @@
 </head>
 <body>
     <div class="container">
+        <!-- Only one server name heading -->
         <h1>{{ server.name }}</h1>
         
         <div class="flash-messages">
@@ -21,7 +22,6 @@
                 {% endif %}
             {% endwith %}
         </div>
-        <h2>{{ server.name }}</h2>
         Status:
         {% if server.is_active %}
           <span class="badge bg-success">Online</span>
@@ -184,6 +184,22 @@
               </div>
             </div>
             
+            {% if server.is_active %}
+                <div class="card">
+                    <h3>Send Command</h3>
+                    <form action="{{ url_for('send_command', server_id=server_id) }}" method="post">
+                        <input type="text" name="command" placeholder="Enter server command..." required>
+                        <button type="submit" class="btn">Send</button>
+                    </form>
+                    {% if server.last_command_response %}
+                        <div class="command-response" style="margin-top: 1em;">
+                            <strong>Last Command Response:</strong>
+                            <pre>{{ server.last_command_response }}</pre>
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
+            
             {% if not server.is_active %}
             <div class="card">
                 <h3>Edit server.properties</h3>
@@ -192,28 +208,6 @@
                     <button type="submit" class="btn btn-primary" style="margin-top:1em;">Save Properties</button>
                 </form>
             </div>
-            {% endif %}
-            
-            {% if server.is_active %}
-                <div class="card">
-                    <h3>Send Command</h3>
-                    <form action="{{ url_for('send_command', server_id=server_id) }}" method="post">
-                        <input type="text" name="command" placeholder="Enter server command..." required>
-                        <button type="submit" class="btn">Send</button>
-                    </form>
-                </div>
-                <form action="{{ url_for('send_command', server_id=server_id) }}" method="post" style="margin-top: 2em;">
-                    <label for="command">Send Command to Server:</label>
-                    <input type="text" name="command" id="command" required>
-                    <button type="submit">Send</button>
-                </form>
-
-                {% if server.last_command_response %}
-                    <div class="command-response" style="margin-top: 1em;">
-                        <strong>Last Command Response:</strong>
-                        <pre>{{ server.last_command_response }}</pre>
-                    </div>
-                {% endif %}
             {% endif %}
         </div>
         

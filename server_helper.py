@@ -161,8 +161,8 @@ def setup_cloudflared_tunnel(tunnel_name):
     return tunnel_process
 
 def write_status_file(server_id, running=True):
-    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+    config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file not found: {config_path}")
         return False
@@ -187,8 +187,8 @@ def set_server_inactive_on_exit(server_id):
 
 def load_server_config(server_id):
     pull_latest()
-    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+    config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
         return None
@@ -196,13 +196,15 @@ def load_server_config(server_id):
         return json.load(f)
 
 def process_pending_command(server_id, server_process):
-    config_path = os.path.join('server_configs', f'{server_id}.json')
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+    config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file {config_path} missing. Stopping server gracefully.")
-        server_process.stdin.write('stop\n')
-        server_process.stdin.flush()
-        time.sleep(2)
-        server_process.terminate()
+        if server_process and server_process.stdin:
+            server_process.stdin.write('stop\n')
+            server_process.stdin.flush()
+            time.sleep(2)
+            server_process.terminate()
         return False
     with open(config_path, 'r') as f:
         config = json.load(f)
@@ -260,7 +262,8 @@ if __name__ == "__main__":
                 if not process_pending_command(server_id, server_process):
                     print("Config missing, server stopped.")
                     break
-                config_path = os.path.join('server_configs', f'{server_id}.json')
+                BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+                config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as f:
                         config = json.load(f)
