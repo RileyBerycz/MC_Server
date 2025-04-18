@@ -27,10 +27,11 @@ jobs:
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-      - name: Set up cloudflared tunnel credentials
+      - name: Set up cloudflared cert
         run: |
           mkdir -p ~/.cloudflared
-          echo "${{ secrets.CLOUDFLARED_CERT }}" > ~/.cloudflared/tunnel.json
+          echo "${{ secrets.CLOUDFLARED_CERT }}" > ~/.cloudflared/cert.pem
+          echo "TUNNEL_ORIGIN_CERT=$HOME/.cloudflared/cert.pem" >> $GITHUB_ENV
 
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}

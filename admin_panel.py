@@ -448,9 +448,15 @@ def view_server(server_id):
         flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
     server = servers[server_id]
+    server_dir = os.path.join("servers", server_id)
+    properties_path = os.path.join(server_dir, "server.properties")
+    if os.path.exists(properties_path):
+        with open(properties_path, 'r') as f:
+            server['server_properties'] = f.read()
+    else:
+        server['server_properties'] = ''
     active_workflows = get_active_github_workflows()
     server['is_active'] = any(w.get('server_id') == server_id for w in active_workflows) or server.get('is_active', False)
-    server_dir = os.path.join("servers", server_id)
     if os.path.exists(server_dir):
         jar_files = [f for f in os.listdir(server_dir) if f.endswith('.jar') and f != 'server.jar']
         server['has_custom_jar'] = len(jar_files) > 0
@@ -615,6 +621,24 @@ def send_command(server_id):
         json.dump(config, f, indent=2)
     commit_and_push(config_path, f"Send command to server {server_id}")
     flash(f'Command "{command}" sent to server.', 'success')
+    return redirect(url_for('view_server', server_id=server_id))
+
+@app.route('/server/<server_id>/edit-properties', methods=['POST'])
+def edit_properties(server_id):
+    load_server_configs()
+    if server_id not in servers:
+        flash('Server not found.', 'error')
+        return redirect(url_for('view_server', server_id=server_id))
+    server_dir = os.path.join("servers", server_id)
+    properties_path = os.path.join(server_dir, "server.properties")
+    new_properties = request.form.get('properties', '')
+    try:
+        with open(properties_path, 'w') as f:
+            f.write(new_properties)
+        commit_and_push(properties_path, f"Update server.properties for {server_id}")
+        flash('server.properties updated successfully.', 'success')
+    except Exception as e:
+        flash(f'Failed to update server.properties: {e}', 'error')
     return redirect(url_for('view_server', server_id=server_id))
 
 @app.route('/shutdown', methods=['POST'])

@@ -19,6 +19,12 @@ def start_server(server_id, server_type, initialize_only=False):
     os.makedirs(server_dir, exist_ok=True)
     os.chdir(server_dir)
 
+    # Check for existing world folder
+    if initialize_only:
+        if os.path.exists("world") and os.path.isdir("world"):
+            print("World folder already exists, skipping initialization.")
+            return True
+
     # Create EULA file
     with open("eula.txt", "w") as f:
         f.write("eula=true\n")
@@ -134,6 +140,9 @@ def start_server(server_id, server_type, initialize_only=False):
     return process
 
 def setup_cloudflared_tunnel(tunnel_name):
+    # Set the environment variable for cloudflared to find cert.pem
+    cert_path = os.path.expanduser("~/.cloudflared/cert.pem")
+    os.environ["TUNNEL_ORIGIN_CERT"] = cert_path
     print(f"Setting up Cloudflare named tunnel: {tunnel_name}", flush=True)
     print(f"Running command: cloudflared tunnel run {tunnel_name}", flush=True)
     tunnel_process = subprocess.Popen(
@@ -141,7 +150,8 @@ def setup_cloudflared_tunnel(tunnel_name):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
-        bufsize=1
+        bufsize=1,
+        env=os.environ.copy()
     )
     def print_tunnel_output():
         for line in iter(tunnel_process.stdout.readline, ''):
@@ -151,7 +161,7 @@ def setup_cloudflared_tunnel(tunnel_name):
     return tunnel_process
 
 def write_status_file(server_id, running=True):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file not found: {config_path}")
@@ -177,7 +187,7 @@ def set_server_inactive_on_exit(server_id):
 
 def load_server_config(server_id):
     pull_latest()
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     config_path = os.path.join(script_dir, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Server config not found: {config_path}", flush=True)
@@ -187,6 +197,13 @@ def load_server_config(server_id):
 
 def process_pending_command(server_id, server_process):
     config_path = os.path.join('server_configs', f'{server_id}.json')
+    if not os.path.exists(config_path):
+        print(f"Config file {config_path} missing. Stopping server gracefully.")
+        server_process.stdin.write('stop\n')
+        server_process.stdin.flush()
+        time.sleep(2)
+        server_process.terminate()
+        return False
     with open(config_path, 'r') as f:
         config = json.load(f)
     pending_command = config.get('pending_command')
@@ -198,6 +215,7 @@ def process_pending_command(server_id, server_process):
         config['pending_command'] = ""
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)
+    return True
 
 if __name__ == "__main__":
     pull_latest()
@@ -239,7 +257,9 @@ if __name__ == "__main__":
             print("Server is running. Press Ctrl+C to stop.", flush=True)
             while True:
                 time.sleep(5)
-                process_pending_command(server_id, server_process)
+                if not process_pending_command(server_id, server_process):
+                    print("Config missing, server stopped.")
+                    break
                 config_path = os.path.join('server_configs', f'{server_id}.json')
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as f:
@@ -252,6 +272,11 @@ if __name__ == "__main__":
                         server_process.stdin.write('stop\n')
                         server_process.stdin.flush()
                         break
+                else:
+                    print("Config file missing during shutdown check. Stopping server.")
+                    server_process.stdin.write('stop\n')
+                    server_process.stdin.flush()
+                    break
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
             server_process.terminate()
