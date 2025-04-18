@@ -12,5 +12,6 @@
   "max_runtime": 350,
   "backup_interval": 6.0,
   "subdomain": "minecraft-test-server",
-  "address": "minecraft-test-server.rileyberycz.co.uk"
+  "address": "minecraft-test-server.rileyberycz.co.uk",
+  "pending_command": "/save"
 }
