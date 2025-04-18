@@ -13,5 +13,6 @@
   "backup_interval": 6.0,
   "subdomain": "minecraft-test-server",
   "address": "minecraft-test-server.rileyberycz.co.uk",
-  "pending_command": "/save"
+  "pending_command": "/save",
+  "shutdown_request": true
 }
