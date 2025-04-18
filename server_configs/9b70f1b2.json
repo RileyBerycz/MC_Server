@@ -6,11 +6,12 @@
   "gamemode": "survival",
   "seed": "",
   "memory": "8G",
-  "is_active": true,
+  "is_active": false,
   "created_at": 1744975971.4461746,
   "last_started": 1744976100,
   "max_runtime": 45,
   "backup_interval": 1.0,
   "subdomain": "minecraft-test-server",
-  "address": "minecraft-test-server.rileyberycz.co.uk"
+  "address": "minecraft-test-server.rileyberycz.co.uk",
+  "last_stopped": 1744976106
 }
