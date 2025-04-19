@@ -86,38 +86,141 @@ def get_next_free_minecraft_number():
             return f"{i:03d}"
     return None
 
-def recycle_lowest_cname(new_subdomain):
+def recycle_lowest_cname(preferred_subdomain):
+    """
+    Find the lowest numbered minecraft-XXX CNAME and rename it to the preferred subdomain.
+    Returns the tunnel ID and the new subdomain.
+    """
+    # Get all minecraft-XXX CNAMEs from Cloudflare
     records = list_minecraft_cnames()
     used_numbers = []
+    
+    # Extract the numeric parts and sort them
     for r in records:
         match = re.match(r"minecraft-(\d{3})\.rileyberycz\.co\.uk", r["name"])
         if match:
             used_numbers.append((int(match.group(1)), r["name"]))
+    
     if not used_numbers:
-        return None
+        logger.error("No minecraft CNAMEs found to recycle!")
+        return None, preferred_subdomain  # Fallback
+    
+    # Sort by number to get the lowest
     used_numbers.sort()
     lowest_num, old_fqdn = used_numbers[0]
     old_subdomain = old_fqdn.split('.')[0]
-    rename_cname(old_subdomain, new_subdomain)
+    
+    # Rename the CNAME in Cloudflare
+    logger.info(f"Renaming CNAME from {old_subdomain} to {preferred_subdomain}")
+    rename_success = rename_cname(old_subdomain, preferred_subdomain)
+    
+    if not rename_success:
+        logger.error(f"Failed to rename CNAME {old_subdomain} -> {preferred_subdomain}")
+        return None, preferred_subdomain  # Fallback
+    
+    # Update the tunnel map
     with open("tunnel_id_map.json", "r") as f:
         tunnel_map = json.load(f)
+    
+    # Get the tunnel ID associated with the old name
     tunnel_id = tunnel_map.pop(old_fqdn)
-    new_fqdn = f"{new_subdomain}.rileyberycz.co.uk"
+    
+    # Add new mapping with the preferred subdomain
+    new_fqdn = f"{preferred_subdomain}.rileyberycz.co.uk"
     tunnel_map[new_fqdn] = tunnel_id
+    
+    # Save the updated map
     with open("tunnel_id_map.json", "w") as f:
         json.dump(tunnel_map, f, indent=2)
-    commit_and_push("tunnel_id_map.json", "Recycle and rename CNAME for new server")
-    return tunnel_id, new_subdomain
+    
+    # Return the tunnel ID and the new subdomain
+    return tunnel_id, preferred_subdomain
+
+def recycle_subdomain_to_number(subdomain):
+    """
+    When deleting a server, rename its CNAME back to minecraft-XXX,
+    where XXX is the lowest available number.
+    """
+    try:
+        # Get all CNAMEs to find available numbers
+        records = list_minecraft_cnames()
+        used_numbers = set()
+        
+        for r in records:
+            match = re.match(r"minecraft-(\d{3})\.rileyberycz\.co\.uk", r["name"])
+            if match:
+                used_numbers.add(int(match.group(1)))
+        
+        # Find the lowest available number
+        next_num = None
+        for i in range(1, 101):
+            if i not in used_numbers:
+                next_num = i
+                break
+                
+        # If all numbers are used, just use 999 as fallback
+        if next_num is None:
+            next_num = 999
+            
+        # Format the new subdomain
+        new_subdomain = f"minecraft-{next_num:03d}"
+        
+        # Rename the CNAME in Cloudflare
+        rename_success = rename_cname(subdomain, new_subdomain)
+        
+        if not rename_success:
+            logger.error(f"Failed to rename CNAME {subdomain} -> {new_subdomain}")
+            return
+        
+        # Update the tunnel map
+        with open("tunnel_id_map.json", "r") as f:
+            tunnel_map = json.load(f)
+        
+        old_fqdn = f"{subdomain}.rileyberycz.co.uk"
+        if old_fqdn in tunnel_map:
+            tunnel_id = tunnel_map.pop(old_fqdn)
+            new_fqdn = f"{new_subdomain}.rileyberycz.co.uk"
+            tunnel_map[new_fqdn] = tunnel_id
+            
+            with open("tunnel_id_map.json", "w") as f:
+                json.dump(tunnel_map, f, indent=2)
+            
+            logger.info(f"Recycled CNAME {subdomain} -> {new_subdomain}")
+            
+    except Exception as e:
+        logger.error(f"Error recycling subdomain {subdomain}: {e}")
 
 def remove_subdomain_from_tunnel_map(subdomain):
-    with open("tunnel_id_map.json", "r") as f:
-        tunnel_map = json.load(f)
-    fqdn = f"{subdomain}.rileyberycz.co.uk"
-    if fqdn in tunnel_map:
-        del tunnel_map[fqdn]
-        with open("tunnel_id_map.json", "w") as f:
-            json.dump(tunnel_map, f, indent=2)
-        commit_and_push("tunnel_id_map.json", "Update tunnel_id_map.json")
+    """Remove subdomain from tunnel map and delete DNS record"""
+    try:
+        # Remove from tunnel_id_map.json
+        with open("tunnel_id_map.json", "r") as f:
+            tunnel_map = json.load(f)
+        
+        fqdn = f"{subdomain}.rileyberycz.co.uk"
+        if fqdn in tunnel_map:
+            del tunnel_map[fqdn]
+            with open("tunnel_id_map.json", "w") as f:
+                json.dump(tunnel_map, f, indent=2)
+            
+            # Also delete the DNS record
+            if CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID:
+                try:
+                    # Find and delete the DNS record
+                    url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records?type=CNAME&name={fqdn}"
+                    resp = requests.get(url, headers=get_cloudflare_headers())
+                    resp.raise_for_status()
+                    records = resp.json()["result"]
+                    
+                    if records:
+                        record_id = records[0]["id"]
+                        delete_url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record_id}"
+                        requests.delete(delete_url, headers=get_cloudflare_headers())
+                        logger.info(f"Deleted CNAME record for {fqdn}")
+                except Exception as e:
+                    logger.error(f"Failed to delete Cloudflare CNAME: {e}")
+    except Exception as e:
+        logger.error(f"Error removing subdomain from tunnel map: {e}")
 
 def sanitize_subdomain(name):
     base = re.sub(r'[^a-z0-9\-]', '', re.sub(r'[\s_]+', '-', name.lower()))
@@ -370,21 +473,14 @@ def create_server():
         # Generate server ID
         server_id = str(uuid.uuid4())[:8]
         
-        # Handle subdomain
-        if custom_subdomain:
-            subdomain = sanitize_subdomain(custom_subdomain)
-        else:
-            subdomain = sanitize_subdomain(server_name)
+        # Get user's preferred subdomain
+        user_subdomain = custom_subdomain if custom_subdomain else server_name
+        user_subdomain = sanitize_subdomain(user_subdomain)
         
-        # Get next available minecraft number if needed
-        if not custom_subdomain:
-            next_num = get_next_free_minecraft_number()
-            if next_num is None:
-                # All 100 are used, recycle the lowest one
-                tunnel_id, subdomain = recycle_lowest_cname(f"minecraft-{server_id[:6]}")
-            else:
-                subdomain = f"minecraft-{next_num}"
-                
+        # Always recycle the lowest numbered CNAME
+        # This replaces the existing logic for getting a subdomain
+        tunnel_id, subdomain = recycle_lowest_cname(user_subdomain)
+        
         # Create server config
         server_config = {
             'id': server_id,
@@ -417,7 +513,7 @@ def create_server():
         commit_and_push([
             os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"),
             readme_path,
-            "tunnel_id_map.json"  # Would create the tunnel and CNAME if needed
+            "tunnel_id_map.json"  # The tunnel map is updated by recycle_lowest_cname
         ], f"Add new server config for {server_name} ({server_id})")
         
         flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
@@ -530,7 +626,7 @@ def stop_server(server_id):
     load_server_configs()
     if server_id not in servers:
         flash(f'Server with ID {server_id} not found!', 'error')
-        return redirect(url_for('view_server', server_id=server_id))
+        return redirect(url_for('index'))
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     with open(config_path, 'r') as f:
         config = json.load(f)
@@ -566,7 +662,7 @@ def delete_server(server_id):
     files_to_commit = []
     subdomain = servers[server_id].get('subdomain')
     if subdomain:
-        remove_subdomain_from_tunnel_map(subdomain)
+        recycle_subdomain_to_number(subdomain)  # This renames instead of deleting
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)
