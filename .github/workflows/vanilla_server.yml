@@ -33,6 +33,10 @@ jobs:
           echo "${{ secrets.CLOUDFLARED_CERT }}" > ~/.cloudflared/cert.pem
           echo "TUNNEL_ORIGIN_CERT=$HOME/.cloudflared/cert.pem" >> $GITHUB_ENV
 
+      - name: Export Cloudflare tunnel creds
+        run: |
+          echo "CLOUDFLARE_TUNNELS_CREDS=${{ secrets.CLOUDFLARE_TUNNELS_CREDS }}" >> $GITHUB_ENV
+
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}
 

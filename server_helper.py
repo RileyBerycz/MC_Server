@@ -142,14 +142,12 @@ def start_server(server_id, server_type, initialize_only=False):
     print("Server fully initialized and running")
     return process
 
-def setup_cloudflared_tunnel(tunnel_name):
-    # Set the environment variable for cloudflared to find cert.pem
-    cert_path = os.path.expanduser("~/.cloudflared/cert.pem")
-    os.environ["TUNNEL_ORIGIN_CERT"] = cert_path
-    print(f"Setting up Cloudflare named tunnel: {tunnel_name}", flush=True)
-    print(f"Running command: cloudflared tunnel run {tunnel_name}", flush=True)
+def setup_cloudflared_tunnel(subdomain, tunnel_name):
+    tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
+    print(f"Setting up Cloudflare named tunnel: {tunnel_name} (ID: {tunnel_id})", flush=True)
+    print(f"Running command: cloudflared tunnel --cred-file {creds_path} run {tunnel_name}", flush=True)
     tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "run", tunnel_name],
+        ["cloudflared", "tunnel", "--cred-file", creds_path, "run", tunnel_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
@@ -162,6 +160,29 @@ def setup_cloudflared_tunnel(tunnel_name):
     threading.Thread(target=print_tunnel_output, daemon=True).start()
     print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
     return tunnel_process
+
+def write_tunnel_creds_file(subdomain):
+    # Load tunnel_id_map.json
+    with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
+        tunnel_id_map = json.load(f)
+    fqdn = f"{subdomain}.rileyberycz.co.uk"
+    tunnel_id = tunnel_id_map.get(fqdn)
+    if not tunnel_id:
+        raise Exception(f"No tunnel ID found for {fqdn} in tunnel_id_map.json")
+    # Load all tunnel creds from secret (should be set as env var or file)
+    creds_env = os.environ.get("CLOUDFLARE_TUNNELS_CREDS")
+    if not creds_env:
+        raise Exception("CLOUDFLARE_TUNNELS_CREDS environment variable not set")
+    all_creds = json.loads(creds_env)
+    tunnel_creds = all_creds.get(tunnel_id)
+    if not tunnel_creds:
+        raise Exception(f"No tunnel creds found for tunnel ID {tunnel_id}")
+    # Write creds to ~/.cloudflared/tunnel-<UUID>.json
+    os.makedirs(os.path.expanduser("~/.cloudflared"), exist_ok=True)
+    creds_path = os.path.expanduser(f"~/.cloudflared/tunnel-{tunnel_id}.json")
+    with open(creds_path, "w") as f:
+        json.dump(tunnel_creds, f)
+    return tunnel_id, creds_path
 
 def write_status_file(server_id, running=True):
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
@@ -248,7 +269,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         tunnel_name = config.get('subdomain')
-        tunnel_process = setup_cloudflared_tunnel(tunnel_name)
+        tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
 
         write_status_file(server_id, running=True)
 
