@@ -79,6 +79,47 @@ def get_next_free_minecraft_number():
             return f"{i:03d}"
     return None
 
+def get_lowest_available_number():
+    used = set()
+    with open("tunnel_id_map.json") as f:
+        tunnel_map = json.load(f)
+    for fqdn in tunnel_map.keys():
+        match = re.match(r"minecraft-(\d{3})\.rileyberycz\.co\.uk", fqdn)
+        if match:
+            used.add(int(match.group(1)))
+    for i in range(1, 101):
+        if i not in used:
+            return f"{i:03d}"
+    return None
+
+def assign_subdomain_to_tunnel(tunnel_id, new_number):
+    # Update tunnel_id_map.json
+    with open("tunnel_id_map.json", "r") as f:
+        tunnel_map = json.load(f)
+    # Find the old fqdn for this tunnel_id
+    old_fqdn = None
+    for fqdn, tid in tunnel_map.items():
+        if tid == tunnel_id:
+            old_fqdn = fqdn
+            break
+    new_fqdn = f"minecraft-{new_number}.rileyberycz.co.uk"
+    if old_fqdn:
+        del tunnel_map[old_fqdn]
+    tunnel_map[new_fqdn] = tunnel_id
+    with open("tunnel_id_map.json", "w") as f:
+        json.dump(tunnel_map, f, indent=2)
+    # Update the CNAME in Cloudflare as needed
+    # (call your Cloudflare API update here)
+
+def remove_subdomain_from_tunnel_map(subdomain):
+    with open("tunnel_id_map.json", "r") as f:
+        tunnel_map = json.load(f)
+    fqdn = f"{subdomain}.rileyberycz.co.uk"
+    if fqdn in tunnel_map:
+        del tunnel_map[fqdn]
+        with open("tunnel_id_map.json", "w") as f:
+            json.dump(tunnel_map, f, indent=2)
+
 def create_cname(subdomain, target):
     url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records"
     data = {
@@ -176,15 +217,20 @@ def sanitize_subdomain(name):
     base = re.sub(r'[^a-z0-9\-]', '', re.sub(r'[\s_]+', '-', name.lower()))
     return f"minecraft-{base}"[:63]
 
-def get_next_available_subdomain(custom_name):
-    pool = load_subdomain_pool()
-    subdomain = sanitize_subdomain(custom_name)
-    candidate = subdomain
-    i = 2
-    while candidate in pool and pool[candidate] == "used":
-        candidate = f"{subdomain}-{i}"
-        i += 1
-    return candidate
+def get_next_available_subdomain():
+    used = set()
+    # Load all current server configs or tunnel_id_map.json
+    with open("tunnel_id_map.json") as f:
+        tunnel_map = json.load(f)
+    for fqdn in tunnel_map.keys():
+        if fqdn.startswith("minecraft-") and fqdn.endswith(".rileyberycz.co.uk"):
+            used.add(fqdn.split(".")[0])
+    for i in range(1, 101):
+        sub = f"minecraft-{i:03d}"
+        fqdn = f"{sub}.rileyberycz.co.uk"
+        if sub not in used:
+            return sub
+    return None  # All taken
 
 def mark_subdomain_used(subdomain):
     pool = load_subdomain_pool()
@@ -406,7 +452,7 @@ def create_server():
         if get_next_free_minecraft_number() is None:
             flash('Maximum number of Minecraft subdomains reached. Please delete an old server first.', 'error')
             return redirect(url_for('create_server'))
-        subdomain = get_next_available_subdomain(server_name)
+        subdomain = get_next_available_subdomain()
         mark_subdomain_used(subdomain)
         server_id = str(uuid.uuid4())[:8]
         tunnel_name, tunnel_cname = create_cloudflare_tunnel(subdomain, subdomain)
@@ -540,6 +586,7 @@ def delete_server(server_id):
     if subdomain:
         rename_cname_to_number(subdomain)
         mark_subdomain_available(subdomain)
+        remove_subdomain_from_tunnel_map(subdomain)
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)

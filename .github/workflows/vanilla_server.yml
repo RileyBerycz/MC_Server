@@ -35,7 +35,9 @@ jobs:
 
       - name: Export Cloudflare tunnel creds
         run: |
-          echo "CLOUDFLARE_TUNNELS_CREDS=${{ secrets.CLOUDFLARE_TUNNELS_CREDS }}" >> $GITHUB_ENV
+          echo 'CLOUDFLARE_TUNNELS_CREDS<<EOF' >> $GITHUB_ENV
+          echo "${{ secrets.CLOUDFLARE_TUNNELS_CREDS }}" >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
 
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}
