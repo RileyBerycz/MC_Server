@@ -209,62 +209,85 @@ def calculate_memory(max_players):
     memory_mb = min(memory_mb, 6144)
     return f"{memory_mb}M"
 
-def get_public_admin_url():
-    logger.info("Attempting to detect admin panel public URL...")
+def setup_tunnels(port):
+    """Set up both cloudflare and ngrok tunnels in parallel"""
+    logger.info("Setting up tunnels for admin panel...")
     
-    # Try ngrok first (backup method)
+    tunnels = {
+        'cloudflare': None,
+        'ngrok': None
+    }
+    
+    # Start Cloudflare Tunnel
     try:
-        logger.info("Checking for ngrok tunnels...")
-        resp = requests.get("http://localhost:4040/api/tunnels", timeout=2)
-        if resp.status_code == 200:
-            tunnels = resp.json().get("tunnels", [])
-            logger.info(f"Found {len(tunnels)} ngrok tunnels")
-            for t in tunnels:
-                if t.get("public_url", "").startswith("https://"):
-                    url = t["public_url"]
-                    logger.info(f"Using ngrok URL: {url}")
-                    return url
-        else:
-            logger.info(f"Ngrok API returned status code: {resp.status_code}")
-    except Exception as e:
-        logger.info(f"Couldn't get ngrok URL: {e}")
-    
-    # Try Cloudflare (primary method)
-    try:
-        logger.info("Looking for admin tunnel in tunnel_id_map.json...")
-        with open("tunnel_id_map.json", "r") as f:
-            tunnel_map = json.load(f)
-        logger.info(f"Found {len(tunnel_map)} tunnels in map")
+        logger.info(f"Starting cloudflared tunnel for port {port}...")
+        cf_process = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
         
-        # First look for specific admin tunnels
-        for fqdn in tunnel_map.keys():
-            if fqdn.startswith("admin.") or "admin-" in fqdn:
-                url = f"https://{fqdn}"
-                logger.info(f"Found dedicated admin tunnel: {url}")
-                return url
+        # Start a thread to capture the cloudflare URL
+        def capture_cf_url():
+            for line in cf_process.stderr:
+                match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+                if match:
+                    tunnels['cloudflare'] = match.group(0)
+                    logger.info(f"Cloudflare tunnel established: {tunnels['cloudflare']}")
+                    break
         
-        # If no specific admin tunnel, use the first minecraft tunnel
-        if tunnel_map:
-            first_domain = next(iter(tunnel_map.keys()))
-            url = f"https://{first_domain.replace('minecraft-', 'admin-')}"
-            logger.info(f"Using derived admin URL: {url}")
-            
-            # Actively log admin URL for easy access
-            bold_url = f"\033[1m{url}\033[0m"  # Bold formatting in terminal
-            print(f"\n{'='*50}\nAdmin Panel available at: {bold_url}\n{'='*50}\n")
-            
-            return url
+        cf_thread = threading.Thread(target=capture_cf_url)
+        cf_thread.daemon = True
+        cf_thread.start()
     except Exception as e:
-        logger.info(f"Couldn't determine Cloudflare admin URL: {e}")
+        logger.error(f"Error starting Cloudflare tunnel: {e}")
     
-    # Fallback to local URL with port - always show something
-    local_url = f"http://localhost:8080"
-    logger.info(f"Using fallback URL: {local_url}")
+    # Start ngrok Tunnel
+    try:     
+        # Configure ngrok with auth token if available
+        ngrok_token = os.environ.get('NGROK_AUTH_TOKEN')
+        if ngrok_token:
+            # If using pyngrok library
+            try:
+                from pyngrok import ngrok, conf
+                conf.get_default().auth_token = ngrok_token
+                # Start tunnel
+                logger.info(f"Starting ngrok tunnel on port {port}...")
+                tunnel = ngrok.connect(port, "http")
+                tunnels['ngrok'] = tunnel.public_url
+            except ImportError:
+                # Fallback to command line ngrok
+                logger.info("pyngrok not available, using command line ngrok...")
+                cmd = f"ngrok http {port}"
+                if ngrok_token:
+                    subprocess.run(f"ngrok authtoken {ngrok_token}", shell=True)
+                ngrok_process = subprocess.Popen(
+                    cmd, shell=True,
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                # Parse ngrok URL from the API
+                time.sleep(3)  # Give ngrok time to start
+                try:
+                    resp = requests.get("http://localhost:4040/api/tunnels")
+                    data = resp.json()
+                    for tunnel in data.get("tunnels", []):
+                        if tunnel.get("proto") == "https":
+                            tunnels['ngrok'] = tunnel.get("public_url")
+                            break
+                except Exception as e:
+                    logger.error(f"Could not get ngrok URL from API: {e}")
+        
+        logger.info(f"ngrok tunnel established: {tunnels['ngrok']}")
+    except Exception as e:
+        logger.error(f"Error setting up ngrok tunnel: {e}")
     
-    # Always log a way to access the panel
-    print(f"\n{'='*50}\nAccess Admin Panel locally at: {local_url}\n{'='*50}\n")
+    # Wait a moment to allow both tunnels to establish
+    time.sleep(5)
     
-    return os.environ.get("ADMIN_PANEL_URL", local_url)
+    return tunnels
 
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
@@ -630,69 +653,26 @@ def main():
     
     load_server_configs()
     
-    # Print Cloudflare or ngrok URL before starting server
-    print("\n" + "*"*80)
-    print("ADMIN PANEL ACCESS URLS:")
-    print("*"*80)
+    # Set up both tunnels for public access
+    tunnel_urls = setup_tunnels(admin_port)
     
-    # Try Cloudflare first (primary method)
-    cloudflare_url = None
-    try:
-        with open("tunnel_id_map.json", "r") as f:
-            tunnel_map = json.load(f)
-        
-        # Look for admin tunnel in tunnel ID map
-        for fqdn in tunnel_map.keys():
-            if fqdn.startswith("admin.") or "admin-" in fqdn:
-                cloudflare_url = f"https://{fqdn}"
-                print(f"\n🌐 PRIMARY URL (CLOUDFLARE): {cloudflare_url}")
-                break
-                
-        # If no admin tunnel found, derive one from a minecraft tunnel
-        if not cloudflare_url and tunnel_map:
-            # Try to find the first minecraft domain
-            minecraft_domains = [d for d in tunnel_map.keys() if d.startswith("minecraft-")]
-            if minecraft_domains:
-                # Replace minecraft- with admin- in the domain
-                admin_domain = minecraft_domains[0].replace("minecraft-", "admin-")
-                cloudflare_url = f"https://{admin_domain}"
-                print(f"\n🌐 DERIVED ADMIN URL (CLOUDFLARE): {cloudflare_url}")
-            else:
-                # Just use the first domain as a fallback
-                first_domain = next(iter(tunnel_map.keys()))
-                cloudflare_url = f"https://{first_domain}"
-                print(f"\n🌐 FALLBACK URL (CLOUDFLARE): {cloudflare_url}")
-    except Exception as e:
-        print(f"Could not determine Cloudflare URL: {e}")
+    # Display URLs to access admin panel
+    if tunnel_urls['cloudflare']:
+        print(f"\n✨ ADMIN PANEL via CLOUDFLARE: {tunnel_urls['cloudflare']} ✨")
+        print(f"::notice::Admin Panel URL (Cloudflare): {tunnel_urls['cloudflare']}")
+    else:
+        print("\n⚠️ Cloudflare tunnel not established!")
     
-    # Try ngrok as backup
-    ngrok_url = None
-    if not cloudflare_url:
-        try:
-            resp = requests.get("http://localhost:4040/api/tunnels", timeout=2)
-            if resp.status_code == 200:
-                tunnels = resp.json().get("tunnels", [])
-                for t in tunnels:
-                    if t.get("public_url", "").startswith("https://"):
-                        ngrok_url = t["public_url"]
-                        print(f"\n🔄 BACKUP URL (NGROK): {ngrok_url}")
-                        break
-        except Exception as e:
-            print(f"Could not determine ngrok URL: {e}")
+    if tunnel_urls['ngrok']:
+        print(f"\n✨ ADMIN PANEL via NGROK: {tunnel_urls['ngrok']} ✨")
+        print(f"::notice::Admin Panel URL (ngrok): {tunnel_urls['ngrok']}")
+    else:
+        print("\n⚠️ ngrok tunnel not established!")
     
-    # Last resort - show local URL
-    if not cloudflare_url and not ngrok_url:
-        print(f"\n⚠️ NO PUBLIC URL FOUND - LOCAL ACCESS ONLY: http://localhost:{admin_port}")
+    if not tunnel_urls['cloudflare'] and not tunnel_urls['ngrok']:
+        print("\n⚠️ WARNING: Failed to establish any tunnels! Admin panel will only be available locally at http://localhost:%d" % admin_port)
     
-    print("\n" + "*"*80 + "\n")
-    
-    # Set environment variable for other processes
-    if cloudflare_url:
-        os.environ["ADMIN_PANEL_URL"] = cloudflare_url
-    elif ngrok_url:
-        os.environ["ADMIN_PANEL_URL"] = ngrok_url
-    
-    # Start the server
+    # Run Flask app
     app.run(host='0.0.0.0', port=admin_port, debug=False)
 
 if __name__ == "__main__":
