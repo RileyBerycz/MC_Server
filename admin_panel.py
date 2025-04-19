@@ -108,6 +108,7 @@ def assign_subdomain_to_tunnel(tunnel_id, new_number):
     tunnel_map[new_fqdn] = tunnel_id
     with open("tunnel_id_map.json", "w") as f:
         json.dump(tunnel_map, f, indent=2)
+    commit_and_push("tunnel_id_map.json", "Update tunnel_id_map.json")
     # Update the CNAME in Cloudflare as needed
     # (call your Cloudflare API update here)
 
@@ -119,6 +120,7 @@ def remove_subdomain_from_tunnel_map(subdomain):
         del tunnel_map[fqdn]
         with open("tunnel_id_map.json", "w") as f:
             json.dump(tunnel_map, f, indent=2)
+        commit_and_push("tunnel_id_map.json", "Update tunnel_id_map.json")
 
 def create_cname(subdomain, target):
     url = f"{CLOUDFLARE_API_BASE}/zones/{CLOUDFLARE_ZONE_ID}/dns_records"
