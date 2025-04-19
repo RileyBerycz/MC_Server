@@ -1,0 +1,18 @@
+{
+  "name": "Test Server",
+  "type": "vanilla",
+  "max_players": 100,
+  "difficulty": "normal",
+  "gamemode": "survival",
+  "seed": "",
+  "memory": "8G",
+  "is_active": true,
+  "created_at": 1744986620.3239453,
+  "last_started": 1744987223,
+  "max_runtime": 350,
+  "backup_interval": 6.0,
+  "subdomain": "minecraft-test-server",
+  "address": "minecraft-test-server.rileyberycz.co.uk",
+  "pending_command": "/save",
+  "shutdown_request": true
+}
