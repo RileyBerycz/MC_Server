@@ -6,7 +6,7 @@
   "gamemode": "survival",
   "seed": "",
   "memory": "8G",
-  "is_active": true,
+  "is_active": false,
   "created_at": 1744986620.3239453,
   "last_started": 1744987223,
   "max_runtime": 350,
