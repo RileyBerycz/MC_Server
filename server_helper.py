@@ -413,6 +413,27 @@ if __name__ == "__main__":
         tunnel_name = config.get('subdomain')
         tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
 
+        # Add connection info with both hostname and direct methods
+        print("\n" + "="*70)
+        print(f"✨ MINECRAFT SERVER READY! ✨")
+        print(f"Connect using address: {config.get('subdomain')}.rileyberycz.co.uk")
+        print(f"If that doesn't work, try connecting via Cloudflare TCP: {tunnel_name}.cfargotunnel.com")
+        print(f"Minecraft version: 1.20.4")
+
+        # Check and display online mode status from server.properties
+        online_mode = "unknown"
+        try:
+            with open(os.path.join(f"servers/{server_id}", "server.properties"), "r") as props:
+                for line in props:
+                    if line.startswith("online-mode="):
+                        online_mode = line.strip().split("=")[1]
+                        break
+        except Exception:
+            pass
+
+        print(f"Online mode: {online_mode} (official account {'required' if online_mode.lower() == 'true' else 'not required'})")
+        print("="*70 + "\n")
+
         write_status_file(server_id, running=True)
 
         import atexit
