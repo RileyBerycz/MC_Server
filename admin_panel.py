@@ -627,7 +627,72 @@ def main():
             print(f"Directory created/verified: {directory}")
         except Exception as e:
             print(f"Warning: Issue with directory '{directory}': {e}")
+    
     load_server_configs()
+    
+    # Print Cloudflare or ngrok URL before starting server
+    print("\n" + "*"*80)
+    print("ADMIN PANEL ACCESS URLS:")
+    print("*"*80)
+    
+    # Try Cloudflare first (primary method)
+    cloudflare_url = None
+    try:
+        with open("tunnel_id_map.json", "r") as f:
+            tunnel_map = json.load(f)
+        
+        # Look for admin tunnel in tunnel ID map
+        for fqdn in tunnel_map.keys():
+            if fqdn.startswith("admin.") or "admin-" in fqdn:
+                cloudflare_url = f"https://{fqdn}"
+                print(f"\n🌐 PRIMARY URL (CLOUDFLARE): {cloudflare_url}")
+                break
+                
+        # If no admin tunnel found, derive one from a minecraft tunnel
+        if not cloudflare_url and tunnel_map:
+            # Try to find the first minecraft domain
+            minecraft_domains = [d for d in tunnel_map.keys() if d.startswith("minecraft-")]
+            if minecraft_domains:
+                # Replace minecraft- with admin- in the domain
+                admin_domain = minecraft_domains[0].replace("minecraft-", "admin-")
+                cloudflare_url = f"https://{admin_domain}"
+                print(f"\n🌐 DERIVED ADMIN URL (CLOUDFLARE): {cloudflare_url}")
+            else:
+                # Just use the first domain as a fallback
+                first_domain = next(iter(tunnel_map.keys()))
+                cloudflare_url = f"https://{first_domain}"
+                print(f"\n🌐 FALLBACK URL (CLOUDFLARE): {cloudflare_url}")
+    except Exception as e:
+        print(f"Could not determine Cloudflare URL: {e}")
+    
+    # Try ngrok as backup
+    ngrok_url = None
+    if not cloudflare_url:
+        try:
+            resp = requests.get("http://localhost:4040/api/tunnels", timeout=2)
+            if resp.status_code == 200:
+                tunnels = resp.json().get("tunnels", [])
+                for t in tunnels:
+                    if t.get("public_url", "").startswith("https://"):
+                        ngrok_url = t["public_url"]
+                        print(f"\n🔄 BACKUP URL (NGROK): {ngrok_url}")
+                        break
+        except Exception as e:
+            print(f"Could not determine ngrok URL: {e}")
+    
+    # Last resort - show local URL
+    if not cloudflare_url and not ngrok_url:
+        print(f"\n⚠️ NO PUBLIC URL FOUND - LOCAL ACCESS ONLY: http://localhost:{admin_port}")
+    
+    print("\n" + "*"*80 + "\n")
+    
+    # Set environment variable for other processes
+    if cloudflare_url:
+        os.environ["ADMIN_PANEL_URL"] = cloudflare_url
+    elif ngrok_url:
+        os.environ["ADMIN_PANEL_URL"] = ngrok_url
+    
+    # Start the server
     app.run(host='0.0.0.0', port=admin_port, debug=False)
 
 if __name__ == "__main__":
