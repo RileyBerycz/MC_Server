@@ -122,6 +122,21 @@
     <div class="container">
         <h1>Minecraft Server Admin Panel</h1>
         
+        {% if public_url %}
+        <div class="alert alert-info">
+            <h4>Admin Panel URL:</h4>
+            <div class="input-group">
+                <input type="text" class="form-control" value="{{ public_url }}" id="admin-url" readonly>
+                <button class="btn btn-outline-secondary" type="button" 
+                        onclick="navigator.clipboard.writeText('{{ public_url }}').then(() => alert('URL copied!'))">
+                    Copy
+                </button>
+                <a href="{{ public_url }}" target="_blank" class="btn btn-primary">Open</a>
+            </div>
+            <small class="text-muted">Use this URL to access the admin panel from anywhere.</small>
+        </div>
+        {% endif %}
+        
         <div class="flash-messages">
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}

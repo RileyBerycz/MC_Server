@@ -209,6 +209,32 @@ def calculate_memory(max_players):
     memory_mb = min(memory_mb, 6144)
     return f"{memory_mb}M"
 
+def get_public_admin_url():
+    # Try ngrok first (backup method)
+    try:
+        resp = requests.get("http://localhost:4040/api/tunnels", timeout=2)
+        if resp.status_code == 200:
+            tunnels = resp.json().get("tunnels", [])
+            for t in tunnels:
+                if t.get("public_url", "").startswith("https://"):
+                    return t["public_url"]
+    except Exception as e:
+        logger.debug(f"Couldn't get ngrok URL: {e}")
+    
+    # Try Cloudflare (primary method)
+    try:
+        # Look for admin tunnel in tunnel_id_map.json
+        with open("tunnel_id_map.json", "r") as f:
+            tunnel_map = json.load(f)
+        for fqdn in tunnel_map.keys():
+            if fqdn.startswith("admin.") or "admin-" in fqdn:
+                return f"https://{fqdn}"
+    except Exception as e:
+        logger.debug(f"Couldn't determine Cloudflare admin URL: {e}")
+    
+    # Fallback to environment variable
+    return os.environ.get("ADMIN_PANEL_URL", "")
+
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
             static_folder='admin_panel/static')
@@ -224,13 +250,18 @@ def index():
     active_server_ids = {w.get('server_id') for w in active_workflows}
     for server_id, server in servers.items():
         server['is_active'] = server_id in active_server_ids or server.get('is_active', False)
+    
+    # Get and pass the public URL
+    public_url = get_public_admin_url()
+    
     return render_template(
         'dashboard.html',
         servers=servers,
         active_workflows=active_workflows,
         current_year=current_year,
         REPO_OWNER=REPO_OWNER,
-        REPO_NAME=REPO_NAME
+        REPO_NAME=REPO_NAME,
+        public_url=public_url  # Add this line
     )
 
 @app.route('/create-server', methods=['GET', 'POST'])
