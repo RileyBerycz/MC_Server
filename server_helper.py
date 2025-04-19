@@ -22,10 +22,11 @@ def start_server(server_id, server_type, initialize_only=False):
     os.makedirs(server_dir, exist_ok=True)
     os.chdir(server_dir)
 
-    # Check for existing world folder
+    # Check for existing world folder - fixed to look for the world directory
     if initialize_only:
-        if os.path.exists("world") and os.path.isdir("world"):
-            print("World folder already exists, skipping initialization.")
+        world_path = "world"
+        if os.path.exists(world_path) and os.path.isdir(world_path):
+            print(f"World folder already exists at {server_dir}/{world_path}, skipping initialization.")
             return True
 
     # Create EULA file
@@ -169,14 +170,51 @@ def write_tunnel_creds_file(subdomain):
     tunnel_id = tunnel_id_map.get(fqdn)
     if not tunnel_id:
         raise Exception(f"No tunnel ID found for {fqdn} in tunnel_id_map.json")
+    
     # Load all tunnel creds from secret (should be set as env var or file)
     creds_env = os.environ.get("CLOUDFLARE_TUNNELS_CREDS")
     if not creds_env:
         raise Exception("CLOUDFLARE_TUNNELS_CREDS environment variable not set")
-    all_creds = json.loads(creds_env)
+    
+    # Ensure the JSON is properly formatted - fix common issues
+    try:
+        # Fix potentially missing closing brace
+        if not creds_env.strip().endswith("}"):
+            creds_env = creds_env.strip() + "}"
+            
+        # Try to parse the JSON
+        all_creds = json.loads(creds_env)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing CLOUDFLARE_TUNNELS_CREDS: {e}")
+        print(f"First 100 characters of creds: {creds_env[:100]}...")
+        print(f"Last 100 characters of creds: {creds_env[-100:] if len(creds_env) > 100 else creds_env}")
+        
+        # Try to extract just the specific tunnel's credentials
+        # This is a fallback if the whole JSON is malformed
+        try:
+            pattern = rf'"{tunnel_id}"\s*:\s*({{\s*"AccountTag".*?"Endpoint"\s*:\s*".*?"\s*}})'
+            match = re.search(pattern, creds_env, re.DOTALL)
+            if match:
+                tunnel_creds_str = match.group(1)
+                tunnel_creds = json.loads(tunnel_creds_str)
+                
+                # Write creds to ~/.cloudflared/tunnel-<UUID>.json
+                os.makedirs(os.path.expanduser("~/.cloudflared"), exist_ok=True)
+                creds_path = os.path.expanduser(f"~/.cloudflared/tunnel-{tunnel_id}.json")
+                with open(creds_path, "w") as f:
+                    json.dump(tunnel_creds, f)
+                print(f"Successfully extracted and saved credentials for tunnel {tunnel_id}")
+                return tunnel_id, creds_path
+        except Exception as inner_e:
+            print(f"Failed to extract individual tunnel creds: {inner_e}")
+            
+        raise Exception(f"Invalid JSON in CLOUDFLARE_TUNNELS_CREDS: {e}")
+    
+    # Get the specific tunnel credentials
     tunnel_creds = all_creds.get(tunnel_id)
     if not tunnel_creds:
         raise Exception(f"No tunnel creds found for tunnel ID {tunnel_id}")
+    
     # Write creds to ~/.cloudflared/tunnel-<UUID>.json
     os.makedirs(os.path.expanduser("~/.cloudflared"), exist_ok=True)
     creds_path = os.path.expanduser(f"~/.cloudflared/tunnel-{tunnel_id}.json")
