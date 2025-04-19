@@ -84,6 +84,7 @@ def start_server(server_id, server_type, initialize_only=False):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
             universal_newlines=True,
             shell=True,
             bufsize=1
@@ -93,6 +94,7 @@ def start_server(server_id, server_type, initialize_only=False):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
             universal_newlines=True,
             bufsize=1
         )
@@ -330,23 +332,54 @@ def process_pending_command(server_id, server_process):
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
     if not os.path.exists(config_path):
         print(f"Config file {config_path} missing. Stopping server gracefully.")
-        if server_process and server_process.stdin:
-            server_process.stdin.write('stop\n')
-            server_process.stdin.flush()
-            time.sleep(2)
-            server_process.terminate()
+        if server_process and hasattr(server_process, 'stdin') and server_process.stdin:
+            try:
+                server_process.stdin.write('stop\n')
+                server_process.stdin.flush()
+                time.sleep(2)
+                server_process.terminate()
+            except Exception as e:
+                print(f"Error sending stop command: {e}")
+                server_process.terminate()
         return False
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    pending_command = config.get('pending_command')
-    if pending_command:
-        print(f"Processing command: {pending_command}")
-        server_process.stdin.write(pending_command + '\n')
-        server_process.stdin.flush()
-        config['last_command_response'] = f"Sent: {pending_command}"
-        config['pending_command'] = ""
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
+    
+    try:
+        # Pull latest changes to ensure we have the most recent config
+        pull_latest()
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        pending_command = config.get('pending_command', '')
+        if pending_command:
+            print(f"Processing command: {pending_command}")
+            
+            # Add '/' prefix if command doesn't already have it (except for 'stop' command)
+            if not pending_command.startswith('/') and pending_command != 'stop':
+                command_to_send = f'/{pending_command}\n'
+            else:
+                command_to_send = f'{pending_command}\n'
+            
+            try:
+                print(f"Sending command to server: {command_to_send.strip()}")
+                server_process.stdin.write(command_to_send)
+                server_process.stdin.flush()
+                config['last_command_response'] = f"Sent: {pending_command}"
+                config['pending_command'] = ""
+                
+                # Save the updated config back
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                
+                # Commit the change
+                commit_and_push(config_path, f"Cleared pending command after execution for {server_id}")
+            except Exception as e:
+                print(f"Error sending command to server: {e}")
+                return False
+    except Exception as e:
+        print(f"Error processing pending command: {e}")
+        return False
+    
     return True
 
 if __name__ == "__main__":
@@ -389,25 +422,58 @@ if __name__ == "__main__":
             print("Server is running. Press Ctrl+C to stop.", flush=True)
             while True:
                 time.sleep(5)
+                
+                # Pull latest changes to ensure we have up-to-date configs
+                pull_latest()
+                
                 if not process_pending_command(server_id, server_process):
-                    print("Config missing, server stopped.")
+                    print("Config missing or command processing failed, server stopped.")
                     break
+                    
                 config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as f:
                         config = json.load(f)
+                    
+                    # Check for shutdown request
                     if config.get('shutdown_request'):
                         print("Shutdown requested via config. Stopping server...", flush=True)
                         config['shutdown_request'] = False
                         with open(config_path, 'w') as f:
                             json.dump(config, f, indent=2)
-                        server_process.stdin.write('stop\n')
-                        server_process.stdin.flush()
-                        break
+                        
+                        try:
+                            print("Sending stop command to server")
+                            server_process.stdin.write('stop\n')
+                            server_process.stdin.flush()
+                            
+                            # Wait for server to stop gracefully
+                            print("Waiting for server to stop gracefully...")
+                            for _ in range(30):  # 30 second timeout
+                                if server_process.poll() is not None:
+                                    print("Server stopped gracefully!")
+                                    break
+                                time.sleep(1)
+                            
+                            # If server didn't stop, terminate it
+                            if server_process.poll() is None:
+                                print("Server didn't stop gracefully, terminating...")
+                                server_process.terminate()
+                            
+                            # Commit the change to show shutdown request was processed
+                            commit_and_push(config_path, f"Processed shutdown request for {server_id}")
+                            break
+                        except Exception as e:
+                            print(f"Error stopping server: {e}")
+                            server_process.terminate()
+                            break
                 else:
                     print("Config file missing during shutdown check. Stopping server.")
-                    server_process.stdin.write('stop\n')
-                    server_process.stdin.flush()
+                    try:
+                        server_process.stdin.write('stop\n')
+                        server_process.stdin.flush()
+                    except Exception:
+                        server_process.terminate()
                     break
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
