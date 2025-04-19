@@ -149,7 +149,7 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
     tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
     print(f"Setting up Cloudflare named tunnel: {tunnel_name} (ID: {tunnel_id})", flush=True)
     
-    # Create a config file with ingress rules - improved version with multiple options
+    # Create a config file with ingress rules - fixed to work with temporary URLs
     config_dir = os.path.expanduser("~/.cloudflared")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f"config-{tunnel_id}.yaml")
@@ -161,18 +161,20 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
         # Named hostname route for the domain
         f.write(f"  - hostname: {subdomain}.rileyberycz.co.uk\n")
         f.write("    service: tcp://localhost:25565\n")
-        # Add a route for temporary direct testing - no hostname check
-        f.write("  - service: tcp://localhost:25565\n")
-        # Default catch-all
+        # Default catch-all - MUST BE LAST
         f.write("  - service: http_status:404\n")
     
     print(f"Created config file with ingress rules at {config_path}", flush=True)
     
-    # Start tunnel with URL display option to get temporary URL
-    print(f"Running command: cloudflared tunnel --url tcp://localhost:25565 --config {config_path} run {tunnel_name}", flush=True)
+    # Create a separate temporary tunnel for direct testing
+    temp_config_path = os.path.join(config_dir, "temp-tunnel-config.yaml")
+    print(f"Setting up temporary tunnel for direct TCP testing...", flush=True)
     
-    tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", "tcp://localhost:25565", "--config", config_path, "run", tunnel_name],
+    # Start tunnel with only the --url flag to generate a temporary URL
+    print(f"Running command: cloudflared tunnel --url tcp://localhost:25565", flush=True)
+    
+    temp_tunnel_process = subprocess.Popen(
+        ["cloudflared", "tunnel", "--url", "tcp://localhost:25565"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
@@ -180,18 +182,42 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
         env=os.environ.copy()
     )
     
-    def print_tunnel_output():
-        for line in iter(tunnel_process.stdout.readline, ''):
-            print(f"CLOUDFLARED: {line.strip()}", flush=True)
+    # Start the main tunnel separately
+    print(f"Running command: cloudflared tunnel --config {config_path} run {tunnel_name}", flush=True)
+    tunnel_process = subprocess.Popen(
+        ["cloudflared", "tunnel", "--config", config_path, "run", tunnel_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1,
+        env=os.environ.copy()
+    )
+    
+    # Handle output from both tunnels
+    def print_temp_tunnel_output():
+        for line in iter(temp_tunnel_process.stdout.readline, ''):
+            print(f"TEMP-CLOUDFLARED: {line.strip()}", flush=True)
             # Look for temporary URL in output
             if "trycloudflare.com" in line:
                 print("\n" + "="*70)
-                print(f"✨ TEMPORARY CLOUDFLARE URL DETECTED! ✨")
-                print(f"Try connecting to: {line.strip()}")
+                print(f"✨ TEMPORARY CLOUDFLARE TCP URL DETECTED! ✨")
+                url_match = re.search(r'(https?://[^\s]+)', line)
+                if url_match:
+                    temp_url = url_match.group(1)
+                    print(f"Try connecting to Minecraft using: {temp_url.replace('https://', '')}")
+                    print("(Use just the domain part without https:// in Minecraft)")
+                else:
+                    print(f"Try connecting to: {line.strip()}")
                 print("="*70 + "\n")
     
+    def print_tunnel_output():
+        for line in iter(tunnel_process.stdout.readline, ''):
+            print(f"CLOUDFLARED: {line.strip()}", flush=True)
+    
+    threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
     threading.Thread(target=print_tunnel_output, daemon=True).start()
-    print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
+    
+    print(f"Cloudflared processes started - main tunnel PID: {tunnel_process.pid}, temp tunnel PID: {temp_tunnel_process.pid}", flush=True)
     return tunnel_process
 
 def write_tunnel_creds_file(subdomain):
