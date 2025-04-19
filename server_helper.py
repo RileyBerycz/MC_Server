@@ -146,15 +146,32 @@ def start_server(server_id, server_type, initialize_only=False):
 def setup_cloudflared_tunnel(subdomain, tunnel_name):
     tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
     print(f"Setting up Cloudflare named tunnel: {tunnel_name} (ID: {tunnel_id})", flush=True)
-    print(f"Running command: cloudflared tunnel --cred-file {creds_path} run {tunnel_name}", flush=True)
+    
+    # Create a config file with ingress rules
+    config_dir = os.path.expanduser("~/.cloudflared")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, f"config-{tunnel_id}.yaml")
+    
+    with open(config_path, "w") as f:
+        f.write(f"tunnel: {tunnel_id}\n")
+        f.write(f"credentials-file: {creds_path}\n")
+        f.write("ingress:\n")
+        f.write(f"  - hostname: {subdomain}.rileyberycz.co.uk\n")
+        f.write("    service: tcp://localhost:25565\n")
+        f.write("  - service: http_status:404\n")
+    
+    print(f"Created config file with ingress rules at {config_path}", flush=True)
+    print(f"Running command: cloudflared tunnel --config {config_path} run {tunnel_name}", flush=True)
+    
     tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--cred-file", creds_path, "run", tunnel_name],
+        ["cloudflared", "tunnel", "--config", config_path, "run", tunnel_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
         bufsize=1,
         env=os.environ.copy()
     )
+    
     def print_tunnel_output():
         for line in iter(tunnel_process.stdout.readline, ''):
             print(f"CLOUDFLARED: {line.strip()}", flush=True)
