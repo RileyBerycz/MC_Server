@@ -668,6 +668,18 @@ def edit_properties(server_id):
         flash(f'Failed to update server.properties: {e}', 'error')
     return redirect(url_for('view_server', server_id=server_id))
 
+@app.route('/shutdown', methods=['POST'])
+def shutdown_server_route():
+    """Shutdown the admin panel and exit the process."""
+    with open("SHUTDOWN_REQUESTED", "w") as f:
+        f.write("Shutdown requested at " + str(datetime.datetime.now()))
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func:
+        func()
+    else:
+        os._exit(0)  # Fallback: force exit if not running with Werkzeug
+    return render_template('shutdown.html')
+
 def main():
     admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
     print("GITHUB_TOKEN present:", bool(GITHUB_TOKEN))
