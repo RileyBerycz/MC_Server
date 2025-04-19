@@ -289,6 +289,40 @@ def setup_tunnels(port):
     
     return tunnels
 
+def get_public_admin_url():
+    """Get the public URL for the admin panel, trying Cloudflare first, then ngrok"""
+    # Try to use an existing tunnel from setup_tunnels
+    # For Cloudflare
+    try:
+        cf_process = subprocess.Popen(
+            ["cloudflared", "tunnel", "url"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, stderr = cf_process.communicate(timeout=2)
+        for line in stdout.splitlines() + stderr.splitlines():
+            match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+            if match:
+                return match.group(0)
+    except Exception as e:
+        logger.debug(f"Could not get Cloudflare URL: {e}")
+    
+    # Check for ngrok tunnel
+    try:
+        resp = requests.get("http://localhost:4040/api/tunnels", timeout=1)
+        if resp.status_code == 200:
+            tunnels = resp.json().get("tunnels", [])
+            for tunnel in tunnels:
+                if tunnel.get("proto") == "https":
+                    return tunnel.get("public_url")
+    except Exception as e:
+        logger.debug(f"Could not get ngrok URL: {e}")
+    
+    # If we already have tunnel URLs from main(), use them
+    admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
+    return f"http://localhost:{admin_port}"
+
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
             static_folder='admin_panel/static')
