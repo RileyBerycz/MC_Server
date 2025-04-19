@@ -210,30 +210,61 @@ def calculate_memory(max_players):
     return f"{memory_mb}M"
 
 def get_public_admin_url():
+    logger.info("Attempting to detect admin panel public URL...")
+    
     # Try ngrok first (backup method)
     try:
+        logger.info("Checking for ngrok tunnels...")
         resp = requests.get("http://localhost:4040/api/tunnels", timeout=2)
         if resp.status_code == 200:
             tunnels = resp.json().get("tunnels", [])
+            logger.info(f"Found {len(tunnels)} ngrok tunnels")
             for t in tunnels:
                 if t.get("public_url", "").startswith("https://"):
-                    return t["public_url"]
+                    url = t["public_url"]
+                    logger.info(f"Using ngrok URL: {url}")
+                    return url
+        else:
+            logger.info(f"Ngrok API returned status code: {resp.status_code}")
     except Exception as e:
-        logger.debug(f"Couldn't get ngrok URL: {e}")
+        logger.info(f"Couldn't get ngrok URL: {e}")
     
     # Try Cloudflare (primary method)
     try:
-        # Look for admin tunnel in tunnel_id_map.json
+        logger.info("Looking for admin tunnel in tunnel_id_map.json...")
         with open("tunnel_id_map.json", "r") as f:
             tunnel_map = json.load(f)
+        logger.info(f"Found {len(tunnel_map)} tunnels in map")
+        
+        # First look for specific admin tunnels
         for fqdn in tunnel_map.keys():
             if fqdn.startswith("admin.") or "admin-" in fqdn:
-                return f"https://{fqdn}"
+                url = f"https://{fqdn}"
+                logger.info(f"Found dedicated admin tunnel: {url}")
+                return url
+        
+        # If no specific admin tunnel, use the first minecraft tunnel
+        if tunnel_map:
+            first_domain = next(iter(tunnel_map.keys()))
+            url = f"https://{first_domain.replace('minecraft-', 'admin-')}"
+            logger.info(f"Using derived admin URL: {url}")
+            
+            # Actively log admin URL for easy access
+            bold_url = f"\033[1m{url}\033[0m"  # Bold formatting in terminal
+            print(f"\n{'='*50}\nAdmin Panel available at: {bold_url}\n{'='*50}\n")
+            
+            return url
     except Exception as e:
-        logger.debug(f"Couldn't determine Cloudflare admin URL: {e}")
+        logger.info(f"Couldn't determine Cloudflare admin URL: {e}")
     
-    # Fallback to environment variable
-    return os.environ.get("ADMIN_PANEL_URL", "")
+    # Fallback to local URL with port - always show something
+    local_url = f"http://localhost:8080"
+    logger.info(f"Using fallback URL: {local_url}")
+    
+    # Always log a way to access the panel
+    print(f"\n{'='*50}\nAccess Admin Panel locally at: {local_url}\n{'='*50}\n")
+    
+    return os.environ.get("ADMIN_PANEL_URL", local_url)
 
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
@@ -251,8 +282,9 @@ def index():
     for server_id, server in servers.items():
         server['is_active'] = server_id in active_server_ids or server.get('is_active', False)
     
-    # Get and pass the public URL
+    # Get and log the public URL
     public_url = get_public_admin_url()
+    logger.info(f"Using admin panel URL: {public_url}")
     
     return render_template(
         'dashboard.html',
@@ -261,7 +293,7 @@ def index():
         current_year=current_year,
         REPO_OWNER=REPO_OWNER,
         REPO_NAME=REPO_NAME,
-        public_url=public_url  # Add this line
+        public_url=public_url
     )
 
 @app.route('/create-server', methods=['GET', 'POST'])
@@ -276,19 +308,29 @@ def create_server():
         memory = request.form.get('memory', '')
         max_runtime = int(request.form.get('max_runtime', 350))
         backup_interval = float(request.form.get('backup_interval', 6.0))
-        user_subdomain = sanitize_subdomain(server_name)
-        if get_next_free_minecraft_number() is None:
-            # All 100 are used, recycle the lowest one
-            tunnel_id, subdomain = recycle_lowest_cname(user_subdomain)
-        else:
-            subdomain = get_next_available_subdomain()
-            # Here you would create the tunnel and CNAME if needed
-            # For this setup, assume tunnel_id is already mapped in tunnel_id_map.json
-            with open("tunnel_id_map.json") as f:
-                tunnel_map = json.load(f)
-            tunnel_id = tunnel_map.get(f"{subdomain}.rileyberycz.co.uk")
+        custom_subdomain = request.form.get('custom_subdomain', '')
+        
+        # Generate server ID
         server_id = str(uuid.uuid4())[:8]
+        
+        # Handle subdomain
+        if custom_subdomain:
+            subdomain = sanitize_subdomain(custom_subdomain)
+        else:
+            subdomain = sanitize_subdomain(server_name)
+        
+        # Get next available minecraft number if needed
+        if not custom_subdomain:
+            next_num = get_next_free_minecraft_number()
+            if next_num is None:
+                # All 100 are used, recycle the lowest one
+                tunnel_id, subdomain = recycle_lowest_cname(f"minecraft-{server_id[:6]}")
+            else:
+                subdomain = f"minecraft-{next_num}"
+                
+        # Create server config
         server_config = {
+            'id': server_id,
             'name': server_name,
             'type': server_type,
             'max_players': max_players,
@@ -296,27 +338,35 @@ def create_server():
             'gamemode': gamemode,
             'seed': seed,
             'memory': memory if memory else calculate_memory(max_players),
-            'is_active': False,
             'created_at': time.time(),
-            'last_started': 0,
+            'is_active': False,
             'max_runtime': max_runtime,
             'backup_interval': backup_interval,
             'subdomain': subdomain,
-            'address': f"{subdomain}.rileyberycz.co.uk"
+            'tunnel_url': f"https://{subdomain}.rileyberycz.co.uk"
         }
+        
+        # Save the server config
         save_server_config(server_id, server_config)
-        servers[server_id] = server_config
+        
+        # Create server directory and README
         server_dir = os.path.join("servers", server_id)
         os.makedirs(server_dir, exist_ok=True)
         readme_path = os.path.join(server_dir, "README.md")
         with open(readme_path, "w") as f:
             f.write(f"# {server_name}\n\nServer ID: {server_id}\nType: {server_type}\nCreated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
+        # Commit changes
         commit_and_push([
             os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"),
-            readme_path
+            readme_path,
+            "tunnel_id_map.json"  # Would create the tunnel and CNAME if needed
         ], f"Add new server config for {server_name} ({server_id})")
+        
         flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
         return redirect(url_for('index'))
+        
+    # Define server types for the template
     SERVER_TYPES = {
         'vanilla': {
             'name': 'Vanilla',
@@ -362,22 +412,27 @@ def view_server(server_id):
     if server_id not in servers:
         flash(f'Server with ID {server_id} not found!', 'error')
         return redirect(url_for('index'))
+        
     server = servers[server_id]
     server_dir = os.path.join("servers", server_id)
     properties_path = os.path.join(server_dir, "server.properties")
+    
     if os.path.exists(properties_path):
         with open(properties_path, 'r') as f:
             server['server_properties'] = f.read()
     else:
         server['server_properties'] = ''
+        
     active_workflows = get_active_github_workflows()
     server['is_active'] = any(w.get('server_id') == server_id for w in active_workflows) or server.get('is_active', False)
+    
     if os.path.exists(server_dir):
         jar_files = [f for f in os.listdir(server_dir) if f.endswith('.jar') and f != 'server.jar']
         server['has_custom_jar'] = len(jar_files) > 0
         server['custom_jar_name'] = jar_files[0] if server['has_custom_jar'] else None
     else:
         server['has_custom_jar'] = False
+        
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
@@ -385,6 +440,7 @@ def view_server(server_id):
         server['last_command_response'] = config.get('last_command_response', '')
     else:
         server['last_command_response'] = ''
+        
     return render_template('manage_server.html', 
                           server=server,
                           server_id=server_id,
