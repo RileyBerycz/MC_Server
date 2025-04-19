@@ -149,7 +149,7 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
     tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
     print(f"Setting up Cloudflare named tunnel: {tunnel_name} (ID: {tunnel_id})", flush=True)
     
-    # Create a config file with ingress rules
+    # Create a config file with ingress rules - improved version with multiple options
     config_dir = os.path.expanduser("~/.cloudflared")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f"config-{tunnel_id}.yaml")
@@ -158,15 +158,21 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
         f.write(f"tunnel: {tunnel_id}\n")
         f.write(f"credentials-file: {creds_path}\n")
         f.write("ingress:\n")
+        # Named hostname route for the domain
         f.write(f"  - hostname: {subdomain}.rileyberycz.co.uk\n")
         f.write("    service: tcp://localhost:25565\n")
+        # Add a route for temporary direct testing - no hostname check
+        f.write("  - service: tcp://localhost:25565\n")
+        # Default catch-all
         f.write("  - service: http_status:404\n")
     
     print(f"Created config file with ingress rules at {config_path}", flush=True)
-    print(f"Running command: cloudflared tunnel --config {config_path} run {tunnel_name}", flush=True)
+    
+    # Start tunnel with URL display option to get temporary URL
+    print(f"Running command: cloudflared tunnel --url tcp://localhost:25565 --config {config_path} run {tunnel_name}", flush=True)
     
     tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--config", config_path, "run", tunnel_name],
+        ["cloudflared", "tunnel", "--url", "tcp://localhost:25565", "--config", config_path, "run", tunnel_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
@@ -177,6 +183,13 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
     def print_tunnel_output():
         for line in iter(tunnel_process.stdout.readline, ''):
             print(f"CLOUDFLARED: {line.strip()}", flush=True)
+            # Look for temporary URL in output
+            if "trycloudflare.com" in line:
+                print("\n" + "="*70)
+                print(f"✨ TEMPORARY CLOUDFLARE URL DETECTED! ✨")
+                print(f"Try connecting to: {line.strip()}")
+                print("="*70 + "\n")
+    
     threading.Thread(target=print_tunnel_output, daemon=True).start()
     print(f"Cloudflared process started with PID: {tunnel_process.pid}", flush=True)
     return tunnel_process
@@ -417,21 +430,8 @@ if __name__ == "__main__":
         print("\n" + "="*70)
         print(f"✨ MINECRAFT SERVER READY! ✨")
         print(f"Connect using address: {config.get('subdomain')}.rileyberycz.co.uk")
-        print(f"If that doesn't work, try connecting via Cloudflare TCP: {tunnel_name}.cfargotunnel.com")
+        print(f"For direct tunnel testing, look for a 'trycloudflare.com' URL in the logs")
         print(f"Minecraft version: 1.20.4")
-
-        # Check and display online mode status from server.properties
-        online_mode = "unknown"
-        try:
-            with open(os.path.join(f"servers/{server_id}", "server.properties"), "r") as props:
-                for line in props:
-                    if line.startswith("online-mode="):
-                        online_mode = line.strip().split("=")[1]
-                        break
-        except Exception:
-            pass
-
-        print(f"Online mode: {online_mode} (official account {'required' if online_mode.lower() == 'true' else 'not required'})")
         print("="*70 + "\n")
 
         write_status_file(server_id, running=True)
