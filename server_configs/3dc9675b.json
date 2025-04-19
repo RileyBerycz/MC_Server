@@ -13,5 +13,6 @@
   "backup_interval": 6.0,
   "subdomain": "minecraft-test",
   "tunnel_url": "https://minecraft-test.rileyberycz.co.uk",
-  "last_started": 1745073018
+  "last_started": 1745073018,
+  "shutdown_request": true
 }
