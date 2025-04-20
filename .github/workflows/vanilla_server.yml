@@ -92,16 +92,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start server and tunnel
+      - name: Start server and verify binding
         run: |
-          python3 -u server_helper.py ${{ inputs.server_id }} vanilla
-
-      - name: Verify server binding
-        run: |
+          # Start the server in the background
+          python3 -u server_helper.py ${{ inputs.server_id }} vanilla &
+          SERVER_PID=$!
+          
+          # Wait for server to initialize (adjust time as needed)
+          echo "Waiting 30 seconds for server to initialize..."
+          sleep 30
+          
+          # Verify server binding
           echo "Checking Minecraft server binding..."
           netstat -tulpn | grep java
+          
+          # Test connection
           echo "Checking if server is accessible from localhost:"
           nc -z -v localhost 25565 || echo "Connection failed!"
+          
+          # Keep the server running for the rest of the workflow
+          # The server will be terminated when the workflow completes
+          wait $SERVER_PID
 
       - name: Commit world and server data
         if: always()
