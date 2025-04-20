@@ -23,6 +23,28 @@ def start_server(server_id, server_type, initialize_only=False):
     os.makedirs(server_dir, exist_ok=True)
     os.chdir(server_dir)
 
+    # Create default server.properties if missing
+    if not os.path.exists("server.properties"):
+        print(f"Creating default server.properties in {server_dir}")
+        with open("server.properties", "w") as f:
+            f.write("enable-jmx-monitoring=false\nrcon.port=25575\nlevel-seed=\ngamemode=survival\n")
+            f.write("enable-command-block=true\nenable-query=false\ngenerator-settings={}\nlevel-name=world\n")
+            f.write("motd=A Minecraft Server\nquery.port=25565\npvp=true\ndifficulty=easy\n")
+            f.write("network-compression-threshold=256\nmax-tick-time=60000\nrequire-resource-pack=false\n")
+            f.write("max-players=20\nuse-native-transport=true\nonline-mode=true\nenable-status=true\n")
+            f.write("allow-flight=false\nbroadcast-rcon-to-ops=true\nview-distance=10\nserver-ip=\n")
+            f.write("resource-pack-prompt=\nallow-nether=true\nserver-port=25565\nenable-rcon=false\n")
+            f.write("sync-chunk-writes=true\nop-permission-level=4\nprevent-proxy-connections=false\n")
+            f.write("hide-online-players=false\nresource-pack=\nentity-broadcast-range-percentage=100\n")
+            f.write("simulation-distance=10\nrcon.password=\nplayer-idle-timeout=0\nforce-gamemode=false\n")
+            f.write("rate-limit=0\nhardcore=false\nwhite-list=false\nbroadcast-console-to-ops=true\n")
+            f.write("spawn-npcs=true\nspawn-animals=true\nfunction-permission-level=2\nlevel-type=minecraft\\:normal\n")
+            f.write("text-filtering-config=\nspawn-monsters=true\nenforce-whitelist=false\nspawn-protection=16\n")
+            f.write("resource-pack-sha1=\nmax-world-size=29999984\n")
+
+    # NEW: Ensure server has correct IP binding for tunneling
+    ensure_correct_server_ip(server_dir)
+
     # Check for existing world folder - fixed to look for the world directory
     if initialize_only:
         world_path = "world"
@@ -57,25 +79,6 @@ def start_server(server_id, server_type, initialize_only=False):
     else:
         print(f"Unknown server type: {server_type}")
         return False
-
-    # Create default server.properties if missing
-    if not os.path.exists("server.properties"):
-        print(f"Creating default server.properties in {server_dir}")
-        with open("server.properties", "w") as f:
-            f.write("enable-jmx-monitoring=false\nrcon.port=25575\nlevel-seed=\ngamemode=survival\n")
-            f.write("enable-command-block=true\nenable-query=false\ngenerator-settings={}\nlevel-name=world\n")
-            f.write("motd=A Minecraft Server\nquery.port=25565\npvp=true\ndifficulty=easy\n")
-            f.write("network-compression-threshold=256\nmax-tick-time=60000\nrequire-resource-pack=false\n")
-            f.write("max-players=20\nuse-native-transport=true\nonline-mode=true\nenable-status=true\n")
-            f.write("allow-flight=false\nbroadcast-rcon-to-ops=true\nview-distance=10\nserver-ip=\n")
-            f.write("resource-pack-prompt=\nallow-nether=true\nserver-port=25565\nenable-rcon=false\n")
-            f.write("sync-chunk-writes=true\nop-permission-level=4\nprevent-proxy-connections=false\n")
-            f.write("hide-online-players=false\nresource-pack=\nentity-broadcast-range-percentage=100\n")
-            f.write("simulation-distance=10\nrcon.password=\nplayer-idle-timeout=0\nforce-gamemode=false\n")
-            f.write("rate-limit=0\nhardcore=false\nwhite-list=false\nbroadcast-console-to-ops=true\n")
-            f.write("spawn-npcs=true\nspawn-animals=true\nfunction-permission-level=2\nlevel-type=minecraft\\:normal\n")
-            f.write("text-filtering-config=\nspawn-monsters=true\nenforce-whitelist=false\nspawn-protection=16\n")
-            f.write("resource-pack-sha1=\nmax-world-size=29999984\n")
 
     print(f"Executing command: {cmd}")
 
@@ -145,6 +148,36 @@ def start_server(server_id, server_type, initialize_only=False):
 
     print("Server fully initialized and running")
     return process
+
+def ensure_correct_server_ip(server_dir):
+    """
+    Ensure server.properties has the correct IP binding for tunneling.
+    For Cloudflare Tunnel to work, the server must bind to 0.0.0.0 or be empty.
+    """
+    properties_path = os.path.join(server_dir, "server.properties")
+    if not os.path.exists(properties_path):
+        print("server.properties not found, will be created with default settings")
+        return
+        
+    # Read current properties
+    with open(properties_path, "r") as f:
+        lines = f.readlines()
+    
+    # Check and update server-ip setting
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("server-ip="):
+            value = line.strip().split("=", 1)[1] if "=" in line else ""
+            if value not in ["", "0.0.0.0"]:
+                print(f"⚠️ Found restrictive server-ip={value} in server.properties")
+                lines[i] = "server-ip=0.0.0.0\n"
+                updated = True
+                print("✅ Updated server-ip to 0.0.0.0 for better tunnel compatibility")
+    
+    # Write back if changed
+    if updated:
+        with open(properties_path, "w") as f:
+            f.writelines(lines)
 
 def setup_cloudflared_tunnel(subdomain, tunnel_name):
     tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
@@ -677,9 +710,42 @@ if __name__ == "__main__":
         tunnel_name = config.get('subdomain')
         tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
 
+        # Add server binding verification
         print("\n" + "="*70)
+        print("VERIFYING SERVER BINDING...")
+        try:
+            # Check server binding using subprocess
+            netstat_output = subprocess.check_output("netstat -tulpn | grep java", shell=True).decode('utf-8')
+            print(f"Server binding information:\n{netstat_output}")
+
+            # Test connection to localhost
+            nc_process = subprocess.run(["nc", "-z", "-v", "localhost", "25565"],
+                                         stderr=subprocess.PIPE,
+                                         text=True)
+            if nc_process.returncode == 0:
+                print("✅ Server is accessible from localhost!")
+            else:
+                print(f"⚠️ Connection test failed: {nc_process.stderr}")
+
+            # Also test direct HTTP request to server to check if it responds
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            result = sock.connect_ex(('localhost', 25565))
+            if result == 0:
+                print("✅ Socket connection to Minecraft server succeeded")
+                # Try to get server status response
+                sock.send(b'\xfe\x01')
+                response = sock.recv(1024)
+                print(f"Server response: {response}")
+            else:
+                print(f"⚠️ Socket connection failed with error code {result}")
+            sock.close()
+        except Exception as e:
+            print(f"Error during verification: {e}")
+
+        print("="*70)
         print(f"✨ MINECRAFT SERVER READY! ✨")
-        
+
         print(f"📌 PRIMARY CONNECTION: {config.get('subdomain')}.rileyberycz.co.uk")
         
         if 'tunnel_id' in config:

@@ -96,6 +96,13 @@ jobs:
         run: |
           python3 -u server_helper.py ${{ inputs.server_id }} vanilla
 
+      - name: Verify server binding
+        run: |
+          echo "Checking Minecraft server binding..."
+          netstat -tulpn | grep java
+          echo "Checking if server is accessible from localhost:"
+          nc -z -v localhost 25565 || echo "Connection failed!"
+
       - name: Commit world and server data
         if: always()
         run: |
