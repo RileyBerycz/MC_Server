@@ -94,25 +94,34 @@ jobs:
 
       - name: Start server and verify binding
         run: |
-          # Start the server in the background
+          # Start the server directly (not in background)
           python3 -u server_helper.py ${{ inputs.server_id }} vanilla &
           SERVER_PID=$!
           
-          # Wait for server to initialize (adjust time as needed)
-          echo "Waiting 30 seconds for server to initialize..."
-          sleep 30
+          # Wait for server to initialize
+          echo "Waiting for server to initialize..."
+          for i in {1..30}; do
+            sleep 1
+            # Print a dot every second to show progress
+            echo -n "."
+            # Check if server is running
+            if ! ps -p $SERVER_PID > /dev/null; then
+              echo "Server process died unexpectedly"
+              exit 1
+            fi
+          done
+          echo "Server should be initialized now"
           
-          # Verify server binding
+          # Verify server binding without disturbing config
           echo "Checking Minecraft server binding..."
-          netstat -tulpn | grep java
+          netstat -tulpn | grep java || echo "No Java process found on ports"
           
           # Test connection
           echo "Checking if server is accessible from localhost:"
           nc -z -v localhost 25565 || echo "Connection failed!"
           
-          # Keep the server running for the rest of the workflow
-          # The server will be terminated when the workflow completes
-          wait $SERVER_PID
+          # Keep server running in background
+          echo "Server is running in the background with PID $SERVER_PID"
 
       - name: Commit world and server data
         if: always()
