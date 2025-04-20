@@ -29,6 +29,8 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_ZONE_ID = os.environ.get("CLOUDFLARE_ZONE_ID")
 CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def get_cloudflare_headers():
     return {
         "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
@@ -240,6 +242,88 @@ def get_next_available_subdomain():
             return sub
     return None
 
+def update_tunnel_domain(original_domain, new_domain):
+    """
+    Update the tunnel mapping when a domain is changed.
+    
+    Args:
+        original_domain: The original domain name (e.g. minecraft-002.rileyberycz.co.uk)
+        new_domain: The new domain name that replaces it
+    """
+    map_path = os.path.join(BASE_DIR, "tunnel_map.json")
+    
+    # Load current tunnel map
+    with open(map_path, "r") as f:
+        tunnel_map = json.load(f)
+    
+    # Check if the original domain exists in the map
+    fqdn = f"{original_domain}.rileyberycz.co.uk" if ".rileyberycz.co.uk" not in original_domain else original_domain
+    new_fqdn = f"{new_domain}.rileyberycz.co.uk" if ".rileyberycz.co.uk" not in new_domain else new_domain
+    
+    if fqdn in tunnel_map:
+        # Save the entry
+        entry = tunnel_map[fqdn]
+        
+        # Update the entry
+        entry["updated_domain"] = new_fqdn
+        
+        # Remove old key and add new key
+        tunnel_map.pop(fqdn)
+        tunnel_map[new_fqdn] = entry
+        
+        # Save the updated map
+        with open(map_path, "w") as f:
+            json.dump(tunnel_map, f, indent=2)
+            
+        print(f"Updated tunnel map: {fqdn} → {new_fqdn}")
+        return True
+    else:
+        print(f"Error: Domain {fqdn} not found in tunnel map")
+        return False
+
+def revert_tunnel_domain(current_domain):
+    """
+    Revert the tunnel mapping when a server is deleted.
+    
+    Args:
+        current_domain: The current domain name to revert
+    """
+    map_path = os.path.join(BASE_DIR, "tunnel_map.json")
+    
+    # Load current tunnel map
+    with open(map_path, "r") as f:
+        tunnel_map = json.load(f)
+    
+    # Check if the domain exists in the map
+    fqdn = f"{current_domain}.rileyberycz.co.uk" if ".rileyberycz.co.uk" not in current_domain else current_domain
+    
+    if fqdn in tunnel_map:
+        # Save the entry
+        entry = tunnel_map[fqdn]
+        original_domain = entry["original_domain"]
+        
+        # Check if this is actually a renamed domain
+        if entry["updated_domain"] and entry["original_domain"] != fqdn:
+            # Clear the updated domain field
+            entry["updated_domain"] = ""
+            
+            # Remove current key and restore original key
+            tunnel_map.pop(fqdn)
+            tunnel_map[original_domain] = entry
+            
+            # Save the updated map
+            with open(map_path, "w") as f:
+                json.dump(tunnel_map, f, indent=2)
+                
+            print(f"Reverted tunnel map: {fqdn} → {original_domain}")
+        else:
+            print(f"Domain {fqdn} is not renamed, no reversion needed")
+            
+        return True
+    else:
+        print(f"Error: Domain {fqdn} not found in tunnel map")
+        return False
+
 def load_server_configs():
     global servers
     pull_latest()
@@ -247,57 +331,46 @@ def load_server_configs():
     if os.path.exists(SERVER_CONFIGS_DIR):
         for filename in os.listdir(SERVER_CONFIGS_DIR):
             if filename.endswith('.json'):
-                server_id = filename[:-5]
-                with open(os.path.join(SERVER_CONFIGS_DIR, filename), 'r') as f:
-                    config = json.load(f)
+                config_path = os.path.join(SERVER_CONFIGS_DIR, filename)
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                    server_id = filename.replace('.json', '')
                     servers[server_id] = config
+                except Exception as e:
+                    logger.error(f"Error loading server config {filename}: {e}")
     return servers
 
-def save_server_config(server_id, config):
-    try:
-        os.makedirs(SERVER_CONFIGS_DIR, exist_ok=True)
-        if 'name' not in config:
-            config['name'] = f"Server {server_id[:6]}"
-        if 'created_at' not in config:
-            config['created_at'] = time.time()
-        config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-            logger.info(f"Saved configuration for server {server_id}")
-    except Exception as e:
-        logger.error(f"Error saving server config {server_id}: {e}")
-        logger.error(traceback.format_exc())
-
 def get_active_github_workflows():
-    if not GITHUB_TOKEN:
-        return []
-    headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
-        'Accept': 'application/vnd.github.v3+json'
-    }
+    workflows = []
     try:
+        if not GITHUB_TOKEN:
+            logger.warning("GITHUB_TOKEN not set, cannot fetch workflows")
+            return []
+            
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
         response = requests.get(f"{GITHUB_API}/actions/runs?status=in_progress", headers=headers)
+        
         if response.status_code == 200:
             data = response.json()
-            workflows = []
             for run in data.get('workflow_runs', []):
-                if run.get('name', '').startswith(('MC Server -', 'Vanilla Minecraft Server', 'Paper Minecraft Server', 'Fabric Minecraft Server', 'Forge Minecraft Server', 'Bedrock Minecraft Server')):
-                    server_id = None
-                    if 'inputs' in run:
-                        server_id = run.get('inputs', {}).get('server_id')
-                    if not server_id and ' - ' in run.get('name', ''):
-                        server_name = run.get('name').split(' - ', 1)[1]
-                        for sid, sconfig in servers.items():
-                            if sconfig.get('name') == server_name:
-                                server_id = sid
-                                break
-                    workflows.append({
-                        'id': run.get('id'),
-                        'name': run.get('name'),
-                        'server_id': server_id,
-                        'started_at': run.get('run_started_at'),
-                        'url': run.get('html_url')
-                    })
+                server_id = None
+                if 'server' in run.get('name', '').lower():
+                    server_name = run.get('name').split(' - ', 1)[1] if ' - ' in run.get('name', '') else ''
+                    for sid, sconfig in servers.items():
+                        if sconfig.get('name') == server_name:
+                            server_id = sid
+                            break
+                workflows.append({
+                    'id': run.get('id'),
+                    'name': run.get('name'),
+                    'server_id': server_id,
+                    'started_at': run.get('run_started_at'),
+                    'url': run.get('html_url')
+                })
             return workflows
         else:
             logger.error(f"Failed to fetch workflows: {response.status_code}")
@@ -478,8 +551,11 @@ def create_server():
         user_subdomain = sanitize_subdomain(user_subdomain)
         
         # Always recycle the lowest numbered CNAME
-        # This replaces the existing logic for getting a subdomain
         tunnel_id, subdomain = recycle_lowest_cname(user_subdomain)
+        
+        # Update the tunnel map with the new domain
+        original_domain = f"minecraft-{get_next_free_minecraft_number()}"
+        update_tunnel_domain(original_domain, subdomain)
         
         # Create server config
         server_config = {
@@ -513,7 +589,7 @@ def create_server():
         commit_and_push([
             os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json"),
             readme_path,
-            "tunnel_id_map.json"  # The tunnel map is updated by recycle_lowest_cname
+            os.path.join(BASE_DIR, "tunnel_map.json")  # Use the path directly
         ], f"Add new server config for {server_name} ({server_id})")
         
         flash(f'Server "{server_name}" created successfully with ID {server_id}!', 'success')
@@ -662,7 +738,19 @@ def delete_server(server_id):
     files_to_commit = []
     subdomain = servers[server_id].get('subdomain')
     if subdomain:
-        recycle_subdomain_to_number(subdomain)  # This renames instead of deleting
+        revert_tunnel_domain(subdomain)
+        print(f"Reverted tunnel domain for {subdomain}")
+        print(f"Files to be committed: {files_to_commit}")
+        
+        # Check and add both possible tunnel map files to ensure consistency
+        tunnel_map_path = os.path.join(BASE_DIR, "tunnel_map.json")
+        tunnel_id_map_path = os.path.join(BASE_DIR, "tunnel_id_map.json")
+        
+        if os.path.exists(tunnel_map_path):
+            files_to_commit.append(tunnel_map_path)
+        
+        if os.path.exists(tunnel_id_map_path):
+            files_to_commit.append(tunnel_id_map_path)
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)
@@ -673,6 +761,7 @@ def delete_server(server_id):
         files_to_commit.append(server_dir)
     server_name = servers[server_id].get('name', 'Unnamed Server')
     del servers[server_id]
+    print(f"Files to be committed: {files_to_commit}")
     commit_and_push(files_to_commit, f"Delete server {server_name} ({server_id})")
     flash(f'Server "{server_name}" has been deleted.', 'success')
     return redirect(url_for('index'))

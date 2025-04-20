@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import threading
+import socket
 from github_helper import pull_latest, commit_and_push
 
 # Ensure unbuffered output
@@ -421,6 +422,169 @@ def process_pending_command(server_id, server_process):
     
     return True
 
+def validate_tunnel_map(subdomain=None):
+    """
+    Validate that tunnel_id_map.json matches the actual DNS records in Cloudflare.
+    If subdomain is provided, only validate that specific subdomain.
+    Returns a list of mismatches found.
+    """
+    print("Validating tunnel map against DNS records...")
+    mismatches = []
+    
+    try:
+        # Load the tunnel map
+        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
+            tunnel_map = json.load(f)
+        
+        # If subdomain is provided, only check that one
+        domains_to_check = {}
+        if subdomain:
+            fqdn = f"{subdomain}.rileyberycz.co.uk"
+            if fqdn in tunnel_map:
+                domains_to_check[fqdn] = tunnel_map[fqdn]
+            else:
+                print(f"Warning: {fqdn} not found in tunnel_id_map.json")
+                return []
+        else:
+            domains_to_check = tunnel_map
+        
+        # Check each FQDN in the map
+        for fqdn, tunnel_id in domains_to_check.items():
+            print(f"Checking {fqdn}...", end="", flush=True)
+                
+            # Get the actual tunnel ID from DNS
+            dns_tunnel_id = lookup_dns_cname(fqdn)
+            
+            # Compare the tunnel IDs
+            if dns_tunnel_id and dns_tunnel_id != tunnel_id:
+                mismatch = {
+                    "fqdn": fqdn,
+                    "map_tunnel_id": tunnel_id,
+                    "dns_tunnel_id": dns_tunnel_id
+                }
+                mismatches.append(mismatch)
+                print(f" ❌ MISMATCH: DNS points to {dns_tunnel_id} but map has {tunnel_id}")
+            elif dns_tunnel_id:
+                print(f" ✅ Correct: {tunnel_id}")
+            else:
+                print(f" ⚠️ Warning: DNS lookup failed")
+                
+    except Exception as e:
+        print(f"Error validating tunnel map: {e}")
+        
+    return mismatches
+
+def lookup_dns_cname(domain):
+    """Try multiple methods to look up a CNAME record."""
+    # Method 1: Using dig
+    try:
+        result = subprocess.check_output(["dig", "CNAME", domain, "+short"], universal_newlines=True).strip()
+        if result and "cfargotunnel.com" in result:
+            return result.split(".")[0]  # Extract tunnel ID
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+    
+    # Method 2: Using nslookup
+    try:
+        result = subprocess.check_output(["nslookup", "-type=CNAME", domain], universal_newlines=True)
+        match = re.search(r'canonical name = ([0-9a-f-]+)\.cfargotunnel\.com', result)
+        if match:
+            return match.group(1)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+    
+    # Method 3: Using host
+    try:
+        result = subprocess.check_output(["host", "-t", "CNAME", domain], universal_newlines=True)
+        match = re.search(r'is an alias for ([0-9a-f-]+)\.cfargotunnel\.com', result)
+        if match:
+            return match.group(1)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+    
+    # Method 4: Windows-specific nslookup syntax
+    try:
+        result = subprocess.check_output(["nslookup", "-type=cname", domain], universal_newlines=True)
+        match = re.search(r'canonical name = ([0-9a-f-]+)\.cfargotunnel\.com', result)
+        if match:
+            return match.group(1)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+    
+    # If all methods fail, return None
+    return None
+
+def is_dns_proxied(domain):
+    """Try to determine if domain is proxied (orange cloud) or DNS only (gray cloud)."""
+    try:
+        # This is an imperfect test - we check if the domain resolves to Cloudflare IPs
+        cloudflare_ip_ranges = [
+            "173.245.48.", "103.21.244.", "103.22.200.", "103.31.4.",
+            "141.101.1.", "108.162.192.", "190.93.240.", "188.114.96.",
+            "197.234.240.", "198.41.128.", "162.158.", "104.16.", "104.17.",
+            "104.18.", "104.19.", "104.20.", "104.21.", "104.22.", "104.23.",
+            "104.24.", "104.25.", "104.26.", "104.27."
+        ]
+        
+        ip = socket.gethostbyname(domain)
+        
+        # Check if the IP belongs to Cloudflare
+        for ip_range in cloudflare_ip_ranges:
+            if ip.startswith(ip_range):
+                return True
+                
+        # If IP doesn't match Cloudflare ranges, it's likely DNS only
+        return False
+    except Exception:
+        # If we can't determine, assume it's not proxied
+        return False
+
+def setup_temp_tcp_tunnel():
+    """Set up a separate temporary TCP tunnel specifically for Minecraft testing."""
+    print("\nSetting up dedicated temporary TCP tunnel for Minecraft...")
+    
+    # Create a temporary random name for this tunnel
+    import uuid
+    temp_tunnel_name = f"temp-mc-{uuid.uuid4().hex[:8]}"
+    
+    # Create a temporary tunnel with TCP ingress rules
+    temp_tunnel_cmd = [
+        "cloudflared", "tunnel", "--no-autoupdate",
+        "--origincert", os.path.expanduser("~/.cloudflared/cert.pem"),
+        "--no-tls-verify", 
+        "--url", "tcp://localhost:25565"
+    ]
+    
+    print(f"Starting temporary tunnel with command: {' '.join(temp_tunnel_cmd)}")
+    
+    temp_tunnel_process = subprocess.Popen(
+        temp_tunnel_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1,
+        env=os.environ.copy()
+    )
+    
+    # Monitor output to find the connection URL
+    def print_temp_tunnel_output():
+        for line in iter(temp_tunnel_process.stdout.readline, ''):
+            print(f"TEMP-TCP: {line.strip()}", flush=True)
+            
+            # Look for direct TCP tunnel URL in the output
+            if "trycloudflare.com" in line:
+                url_match = re.search(r'(https?://[^\s]+)', line)
+                if url_match:
+                    temp_url = url_match.group(1).replace("https://", "")
+                    print("\n" + "="*70)
+                    print(f"✨ TEMPORARY TCP TUNNEL CREATED! ✨")
+                    print(f"Connect to Minecraft using: {temp_url}")
+                    print(f"⚠️ Note: This uses Cloudflare's quick tunnels which may not work for all Minecraft clients")
+                    print("="*70 + "\n")
+    
+    threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
+    return temp_tunnel_process
+
 if __name__ == "__main__":
     pull_latest()
     if len(sys.argv) < 3:
@@ -436,6 +600,49 @@ if __name__ == "__main__":
         print("Could not load server config.")
         sys.exit(1)
 
+    # Validate tunnel mapping for this server
+    print("\n" + "="*70)
+    print("VALIDATING TUNNEL CONFIGURATION")
+    print("="*70)
+    mismatches = validate_tunnel_map(config.get('subdomain'))
+    
+    # Check if there's a mismatch for the current server
+    fqdn = f"{config.get('subdomain')}.rileyberycz.co.uk"
+    current_server_mismatch = next((m for m in mismatches if m['fqdn'] == fqdn), None)
+    
+    if current_server_mismatch:
+        print("\n" + "!"*70)
+        print(f"⚠️ WARNING: TUNNEL ID MISMATCH DETECTED! ⚠️")
+        print(f"Your DNS points to: {current_server_mismatch['dns_tunnel_id']}")
+        print(f"Your config uses: {current_server_mismatch['map_tunnel_id']}")
+        print(f"CONNECTION MAY FAIL UNLESS YOU FIX THIS!")
+        print("!"*70 + "\n")
+        
+        # Offer to fix the mismatch
+        print("Automatically fixing tunnel ID mismatch...")
+        # Update tunnel_id_map.json with the correct tunnel ID from DNS
+        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
+            tunnel_map = json.load(f)
+        
+        # Backup the original map
+        with open(os.path.join(BASE_DIR, "tunnel_id_map.json.backup"), "w") as f:
+            json.dump(tunnel_map, f, indent=2)
+            
+        # Update the map with the correct tunnel ID
+        tunnel_map[fqdn] = current_server_mismatch['dns_tunnel_id']
+        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "w") as f:
+            json.dump(tunnel_map, f, indent=2)
+        
+        print(f"✅ Updated tunnel_id_map.json to match DNS records")
+        print(f"✅ Committing changes to tunnel_id_map.json")
+        
+        # Commit the changes
+        commit_and_push(os.path.join(BASE_DIR, "tunnel_id_map.json"), 
+                       f"Fix tunnel ID for {fqdn} to match DNS ({current_server_mismatch['dns_tunnel_id']})")
+        
+        # Now use the correct tunnel ID
+        config['tunnel_id'] = current_server_mismatch['dns_tunnel_id']
+    
     address = config.get('address')
 
     if initialize_only:
@@ -452,12 +659,27 @@ if __name__ == "__main__":
         tunnel_name = config.get('subdomain')
         tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
 
-        # Add connection info with both hostname and direct methods
+        # Add connection info with all possible connection methods
         print("\n" + "="*70)
         print(f"✨ MINECRAFT SERVER READY! ✨")
-        print(f"Connect using address: {config.get('subdomain')}.rileyberycz.co.uk")
-        print(f"For direct tunnel testing, look for a 'trycloudflare.com' URL in the logs")
-        print(f"Minecraft version: 1.20.4")
+        
+        # Main connection method
+        tunnel_id = config.get('tunnel_id', tunnel_id)
+        print(f"📌 PRIMARY CONNECTION: {config.get('subdomain')}.rileyberycz.co.uk")
+        
+        # Backup connection methods
+        print(f"📌 BACKUP CONNECTION: {tunnel_id}.cfargotunnel.com")
+        
+        # Check DNS proxy status
+        try:
+            is_proxied = is_dns_proxied(f"{config.get('subdomain')}.rileyberycz.co.uk")
+            if not is_proxied:
+                print(f"⚠️ WARNING: Your DNS record appears to be 'DNS only' (gray cloud)")
+                print(f"⚠️ Please change to 'Proxied' (orange cloud) in Cloudflare DNS settings")
+        except Exception:
+            pass
+            
+        print(f"🎮 Minecraft version: 1.20.4")
         print("="*70 + "\n")
 
         write_status_file(server_id, running=True)
