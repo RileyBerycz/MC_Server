@@ -788,6 +788,13 @@ if __name__ == "__main__":
             start_time = time.time()
             last_backup_time = start_time
             
+            # Check if running in GitHub Actions
+            is_github_actions = os.environ.get('GITHUB_ACTIONS') == 'true'
+            if is_github_actions:
+                print(f"⚠️ Running in GitHub Actions environment - will respect max_runtime={config.get('max_runtime', 45)} hours")
+                # For GitHub Actions, don't restart on max_runtime, just exit
+                config['restart_on_max_runtime'] = False
+            
             while True:
                 time.sleep(5)
                 current_time = time.time()
