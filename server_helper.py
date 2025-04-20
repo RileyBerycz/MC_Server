@@ -363,9 +363,61 @@ def write_status_file(server_id, running=True):
 
 def set_server_inactive_on_exit(server_id):
     try:
+        print("⚠️ Server exit detected - ensuring inactive status", flush=True)
         write_status_file(server_id, running=False)
+        ensure_server_inactive(server_id)  # Double-check the inactive status
     except Exception as e:
         print(f"Failed to set server inactive on exit: {e}")
+        # Last resort attempt - direct file write without Git operations
+        try:
+            config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                config['is_active'] = False
+                config['last_stopped'] = int(time.time())
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                print("Emergency config update: Server marked as inactive")
+        except Exception as e2:
+            print(f"All attempts to mark server inactive failed: {e2}")
+
+# Add this function to ensure multiple status updates don't conflict
+def ensure_server_inactive(server_id):
+    """Make absolutely sure the server is marked as inactive on shutdown"""
+    try:
+        # Force a Git pull to get latest config state
+        pull_latest()
+        
+        config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Track if we need to update the config
+            need_update = False
+            
+            # Check and update active status
+            if config.get('is_active', False):
+                print("⚠️ Server still marked as active during shutdown - forcing inactive status")
+                config['is_active'] = False
+                config['last_stopped'] = int(time.time())
+                need_update = True
+            
+            # Check and reset shutdown_request flag
+            if config.get('shutdown_request', False):
+                print("⚠️ Resetting shutdown_request flag to prevent restart issues")
+                config['shutdown_request'] = False
+                need_update = True
+            
+            # Only write and commit if we made changes
+            if need_update:
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                commit_and_push(config_path, f"Update status for {server_id} on shutdown (inactive and reset flags)")
+                print("✅ Server status updated correctly")
+    except Exception as e:
+        print(f"⚠️ Failed to update server status: {e}")
 
 def load_server_config(server_id):
     pull_latest()
@@ -698,13 +750,13 @@ if __name__ == "__main__":
 
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
-        set_server_inactive_on_exit(server_id)
+        ensure_server_inactive(server_id)
         sys.exit(0 if success else 1)
     else:
         server_process = start_server(server_id, server_type)
         if not server_process:
             print("Failed to start server")
-            set_server_inactive_on_exit(server_id)
+            ensure_server_inactive(server_id)
             sys.exit(1)
 
         tunnel_name = config.get('subdomain')
@@ -829,6 +881,7 @@ if __name__ == "__main__":
                         for _ in range(30):
                             if server_process.poll() is not None:
                                 print("Server stopped gracefully!")
+                                ensure_server_inactive(server_id)
                                 break
                             time.sleep(1)
                         
@@ -846,7 +899,7 @@ if __name__ == "__main__":
                     server_process = start_server(server_id, server_type)
                     if not server_process:
                         print("Failed to restart server")
-                        set_server_inactive_on_exit(server_id)
+                        ensure_server_inactive(server_id)
                         sys.exit(1)
                         
                     tunnel_name = config.get('subdomain')
@@ -892,18 +945,13 @@ if __name__ == "__main__":
                             for _ in range(30):
                                 if server_process.poll() is not None:
                                     print("Server stopped gracefully!")
+                                    ensure_server_inactive(server_id)
                                     break
                                 time.sleep(1)
-                            
-                            if server_process.poll() is None:
-                                print("Server didn't stop gracefully, terminating...")
-                                server_process.terminate()
-                            
-                            commit_and_push(config_path, f"Processed shutdown request for {server_id}")
-                            break
                         except Exception as e:
                             print(f"Error stopping server: {e}")
                             server_process.terminate()
+                            ensure_server_inactive(server_id)
                             break
                 else:
                     print("Config file missing during shutdown check. Stopping server.")
@@ -912,6 +960,7 @@ if __name__ == "__main__":
                         server_process.stdin.flush()
                     except Exception:
                         server_process.terminate()
+                    ensure_server_inactive(server_id)
                     break
         except KeyboardInterrupt:
             print("Stopping server and tunnel", flush=True)
@@ -919,6 +968,6 @@ if __name__ == "__main__":
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
         finally:
-            set_server_inactive_on_exit(server_id)
+            ensure_server_inactive(server_id)
         sys.exit(0)
 
