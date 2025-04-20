@@ -14,7 +14,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0  # Get full history to ensure all files are present
+
+      - name: Check tunnel_id_map.json status
+        run: |
+          if [ -f "tunnel_id_map.json" ]; then
+            echo "✅ tunnel_id_map.json exists"
+            cat tunnel_id_map.json | head -n 5
+            echo "..."
+          else
+            echo "⚠️ tunnel_id_map.json not found - will be handled by Python code"
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -41,6 +51,9 @@ jobs:
 
       - name: Prepare server directory
         run: mkdir -p servers/${{ inputs.server_id }}
+
+      - name: Install dependencies
+        run: pip install requests
 
       - name: Download server jar if missing
         run: |
