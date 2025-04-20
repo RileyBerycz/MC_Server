@@ -680,10 +680,26 @@ if __name__ == "__main__":
         print("\n" + "="*70)
         print(f"✨ MINECRAFT SERVER READY! ✨")
         
-        tunnel_id = config.get('tunnel_id', tunnel_id)
         print(f"📌 PRIMARY CONNECTION: {config.get('subdomain')}.rileyberycz.co.uk")
         
-        print(f"📌 BACKUP CONNECTION: {tunnel_id}.cfargotunnel.com")
+        if 'tunnel_id' in config:
+            print(f"📌 BACKUP CONNECTION: {config['tunnel_id']}.cfargotunnel.com")
+        else:
+            try:
+                with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
+                    tunnel_map = json.load(f)
+                
+                fqdn = f"{config.get('subdomain')}.rileyberycz.co.uk"
+                if fqdn in tunnel_map:
+                    if isinstance(tunnel_map[fqdn], dict):
+                        map_tunnel_id = tunnel_map[fqdn].get("tunnel_id")
+                    else:
+                        map_tunnel_id = tunnel_map[fqdn]
+                        
+                    if map_tunnel_id:
+                        print(f"📌 BACKUP CONNECTION: {map_tunnel_id}.cfargotunnel.com")
+            except Exception:
+                pass
         
         try:
             is_proxied = is_dns_proxied(f"{config.get('subdomain')}.rileyberycz.co.uk")
