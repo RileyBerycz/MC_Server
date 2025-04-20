@@ -585,6 +585,110 @@ def setup_temp_tcp_tunnel():
     threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
     return temp_tunnel_process
 
+def backup_server(server_id, backup_reason="scheduled"):
+    """
+    Create a backup of the server world data.
+    
+    Args:
+        server_id: The server ID
+        backup_reason: Why the backup is being created (scheduled/restart/shutdown)
+    
+    Returns:
+        bool: True if backup was successful
+    """
+    print(f"\n=== Creating server backup for {server_id} ({backup_reason}) ===")
+    server_dir = f"servers/{server_id}"
+    backup_dir = os.path.join(BASE_DIR, "backups", server_id)
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    # Create timestamp for backup
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_file = os.path.join(backup_dir, f"{server_id}-{timestamp}.zip")
+    
+    try:
+        # Get list of key server data to backup
+        backup_paths = ["world", "server.properties", "ops.json", "whitelist.json", 
+                        "banned-players.json", "banned-ips.json"]
+        
+        # Only add paths that exist
+        existing_paths = []
+        for path in backup_paths:
+            full_path = os.path.join(server_dir, path)
+            if os.path.exists(full_path):
+                existing_paths.append(path)
+        
+        if not existing_paths:
+            print(f"No data to backup for {server_id}")
+            return False
+            
+        # Create zip backup
+        import zipfile
+        with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Change to server directory
+            original_dir = os.getcwd()
+            os.chdir(server_dir)
+            
+            # Add all files to zip
+            for path in existing_paths:
+                if os.path.isdir(path):
+                    for root, _, files in os.walk(path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            zipf.write(file_path)
+                else:
+                    zipf.write(path)
+                    
+            # Return to original directory
+            os.chdir(original_dir)
+        
+        print(f"Backup created at {backup_file}")
+        
+        # Update backup tracking in config
+        config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        config['last_backup'] = int(time.time())
+        config['last_backup_file'] = backup_file
+        
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+            
+        # Commit the backup info (don't commit the actual backup file)
+        commit_and_push(config_path, f"Update backup info for {server_id}")
+        
+        # Prune old backups
+        prune_backups(server_id, keep_count=10)  # Keep the 10 most recent backups
+        
+        return True
+    except Exception as e:
+        print(f"Error creating backup: {e}")
+        return False
+
+def prune_backups(server_id, keep_count=10):
+    """Clean up old backups, keeping only the most recent ones."""
+    backup_dir = os.path.join(BASE_DIR, "backups", server_id)
+    if not os.path.exists(backup_dir):
+        return
+        
+    try:
+        backups = []
+        for file in os.listdir(backup_dir):
+            if file.startswith(f"{server_id}-") and file.endswith(".zip"):
+                full_path = os.path.join(backup_dir, file)
+                backups.append((full_path, os.path.getmtime(full_path)))
+        
+        # Sort by modification time (newest first)
+        backups.sort(key=lambda x: x[1], reverse=True)
+        
+        # Remove old backups
+        if len(backups) > keep_count:
+            for path, _ in backups[keep_count:]:
+                print(f"Removing old backup: {path}")
+                os.remove(path)
+    except Exception as e:
+        print(f"Error pruning backups: {e}")
+
 if __name__ == "__main__":
     pull_latest()
     if len(sys.argv) < 3:
@@ -689,16 +793,102 @@ if __name__ == "__main__":
 
         try:
             print("Server is running. Press Ctrl+C to stop.", flush=True)
+            start_time = time.time()
+            last_backup_time = start_time
+            
             while True:
                 time.sleep(5)
+                current_time = time.time()
                 
                 # Pull latest changes to ensure we have up-to-date configs
                 pull_latest()
                 
+                # Check if we need to restart due to max runtime
+                runtime_hours = (current_time - start_time) / 3600
+                if config.get('max_runtime') and runtime_hours >= config.get('max_runtime'):
+                    print(f"\n=== Maximum runtime of {config.get('max_runtime')} hours reached ===")
+                    print("Creating backup and restarting server...")
+                    
+                    # Backup before restart
+                    backup_server(server_id, backup_reason="max_runtime")
+                    
+                    # Send warning to players
+                    try:
+                        server_process.stdin.write('say Server will restart in 60 seconds due to scheduled maintenance\n')
+                        server_process.stdin.flush()
+                        time.sleep(30)
+                        server_process.stdin.write('say Server will restart in 30 seconds\n')
+                        server_process.stdin.flush()
+                        time.sleep(20)
+                        server_process.stdin.write('say Server will restart in 10 seconds\n')
+                        server_process.stdin.flush()
+                        time.sleep(10)
+                    except Exception as e:
+                        print(f"Error sending restart warnings: {e}")
+                    
+                    # Stop the server
+                    try:
+                        server_process.stdin.write('stop\n')
+                        server_process.stdin.flush()
+                        
+                        # Wait for server to stop gracefully
+                        print("Waiting for server to stop gracefully...")
+                        for _ in range(30):  # 30 second timeout
+                            if server_process.poll() is not None:
+                                print("Server stopped gracefully!")
+                                break
+                            time.sleep(1)
+                        
+                        # If server didn't stop, terminate it
+                        if server_process.poll() is None:
+                            print("Server didn't stop gracefully, terminating...")
+                            server_process.terminate()
+                    except Exception as e:
+                        print(f"Error stopping server for restart: {e}")
+                        server_process.terminate()
+                    
+                    # Stop tunnels
+                    if 'tunnel_process' in locals():
+                        tunnel_process.terminate()
+                        
+                    # Restart everything
+                    print("\n=== Restarting server and tunnels ===")
+                    server_process = start_server(server_id, server_type)
+                    if not server_process:
+                        print("Failed to restart server")
+                        set_server_inactive_on_exit(server_id)
+                        sys.exit(1)
+                        
+                    tunnel_name = config.get('subdomain')
+                    tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
+                    
+                    # Reset timers
+                    start_time = time.time()
+                    last_backup_time = start_time
+                    print("Server successfully restarted!")
+                    continue
+                
+                # Check if we need to do a periodic backup
+                backup_interval_hours = config.get('backup_interval', 0)
+                if backup_interval_hours > 0:
+                    hours_since_backup = (current_time - last_backup_time) / 3600
+                    if hours_since_backup >= backup_interval_hours:
+                        print(f"\n=== Periodic backup interval of {backup_interval_hours} hours reached ===")
+                        
+                        # Create backup without restarting
+                        if backup_server(server_id, backup_reason="scheduled"):
+                            last_backup_time = current_time
+                            print("Periodic backup completed successfully")
+                
+                # Prune old backups
+                prune_backups(server_id, keep_count=config.get('backup_keep_count', 10))
+                
+                # Process pending commands (existing code)
                 if not process_pending_command(server_id, server_process):
                     print("Config missing or command processing failed, server stopped.")
                     break
                     
+                # Check for shutdown request (existing code)
                 config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
                 if os.path.exists(config_path):
                     with open(config_path, 'r') as f:
@@ -707,9 +897,9 @@ if __name__ == "__main__":
                     # Check for shutdown request
                     if config.get('shutdown_request'):
                         print("Shutdown requested via config. Stopping server...", flush=True)
-                        config['shutdown_request'] = False
-                        with open(config_path, 'w') as f:
-                            json.dump(config, f, indent=2)
+                        
+                        # Backup before shutdown
+                        backup_server(server_id, backup_reason="shutdown")
                         
                         try:
                             print("Sending stop command to server")
@@ -752,3 +942,4 @@ if __name__ == "__main__":
         finally:
             set_server_inactive_on_exit(server_id)
         sys.exit(0)
+
