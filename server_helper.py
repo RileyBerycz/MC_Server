@@ -268,9 +268,13 @@ def setup_serveo_tunnel(server_id):
     # Generate a completely random subdomain
     import random
     import string
-    random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+    random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     serveo_subdomain = f"mc-{random_id}"
-    print(f"✅ Using randomly generated Serveo subdomain: {serveo_subdomain}")
+    
+    # Generate a random high port (between 10000 and 65000)
+    random_port = random.randint(10000, 65000)
+    
+    print(f"✅ Using random tunnel: {serveo_subdomain}:{random_port}")
     
     # Ensure SSH key is accepted automatically
     print("Setting up SSH for Serveo...", flush=True)
@@ -282,8 +286,9 @@ def setup_serveo_tunnel(server_id):
     
     subprocess.run(f"ssh-keyscan -H serveo.net >> {home_dir}/.ssh/known_hosts", shell=True)
     
-    # Start the SSH tunnel with random port assignment (::)
-    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"{serveo_subdomain}::25565", "serveo.net"]
+    # Start the SSH tunnel WITH a specified random high port
+    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", 
+           f"{serveo_subdomain}:{random_port}:localhost:25565", "serveo.net"]
     print(f"Starting Serveo tunnel with command: {' '.join(cmd)}", flush=True)
     
     # Start the tunnel process
@@ -304,10 +309,12 @@ def setup_serveo_tunnel(server_id):
             
             # Look for successful connection
             if "Forwarding" in line and "serveo.net" in line:
-                # Capture both domain and port if available
-                tunnel_info = re.search(r'([a-zA-Z0-9.-]+\.serveo\.net(?::\d+)?)', line)
+                # Improved regex to better capture the full domain:port combination
+                tunnel_info = re.search(r'Forwarding.+?to ([a-zA-Z0-9.-]+\.serveo\.net)(:[0-9]+)?', line)
                 if tunnel_info:
-                    assigned_endpoint = tunnel_info.group(1)
+                    serveo_domain = tunnel_info.group(1)
+                    port_part = tunnel_info.group(2) or f":{random_port}"  # Use specified port if not in output
+                    assigned_endpoint = f"{serveo_domain}{port_part}"
                     tunnel_verified = True
                     
                     # Update the config with the actual domain
@@ -322,8 +329,13 @@ def setup_serveo_tunnel(server_id):
                     print("="*70 + "\n")
             
             # Look for errors
-            if "Error" in line or "error" in line or "denied" in line:
+            if "Error" in line or "error" in line or "denied" in line or "in use" in line:
                 print(f"⚠️ Serveo tunnel error detected: {line.strip()}")
+                
+                # If the error mentions port in use, try a different port
+                if "in use" in line and not tunnel_verified:
+                    print("Port in use, restarting with different port...")
+                    os._exit(2)  # Special exit code to trigger retry
     
     threading.Thread(target=monitor_serveo_output, daemon=True).start()
     
@@ -896,7 +908,27 @@ if __name__ == "__main__":
             sys.exit(1)
 
         tunnel_name = config.get('subdomain')
-        tunnel_process = setup_serveo_tunnel(server_id)
+
+        max_retries = 3
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                tunnel_process = setup_serveo_tunnel(server_id)
+                # If we get here, the tunnel started successfully
+                break
+            except SystemExit as e:
+                if e.code == 2:  # Our special code for port in use
+                    retry_count += 1
+                    print(f"Retrying tunnel setup ({retry_count}/{max_retries})...")
+                    time.sleep(2)  # Brief pause before retry
+                else:
+                    raise  # Re-raise for other exit codes
+
+        if retry_count == max_retries:
+            print("Failed to establish tunnel after multiple attempts")
+            ensure_server_inactive(server_id)
+            sys.exit(1)
 
         # Add server binding verification
         print("\n" + "="*70)
