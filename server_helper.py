@@ -254,6 +254,98 @@ def setup_cloudflared_tunnel(subdomain, tunnel_name):
     print(f"Cloudflared processes started - main tunnel PID: {tunnel_process.pid}, temp tunnel PID: {temp_tunnel_process.pid}", flush=True)
     return tunnel_process
 
+def setup_serveo_tunnel(server_id):
+    """Setup a Serveo SSH tunnel for the Minecraft server"""
+    print("\n" + "="*70)
+    print("SETTING UP SERVEO TUNNEL")
+    print("="*70)
+    
+    # Get the server configuration
+    config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    subdomain = config.get('subdomain')
+    
+    # Load the Serveo mapping
+    with open(os.path.join(BASE_DIR, "serveo_tunnel_map.json"), "r") as f:
+        serveo_map = json.load(f)
+    
+    # Find the corresponding entry in the serveo map
+    serveo_entry = None
+    for mc_id, entry in serveo_map.items():
+        if entry.get('subdomain') == subdomain:
+            serveo_entry = entry
+            break
+    
+    if not serveo_entry:
+        print(f"⚠️ No Serveo mapping found for subdomain {subdomain}")
+        # Generate a random subdomain as fallback
+        import random
+        import string
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        serveo_subdomain = f"mc-{random_id}"
+        serveo_domain = f"{serveo_subdomain}.serveo.net"
+        print(f"✅ Using generated Serveo subdomain: {serveo_subdomain}")
+    else:
+        serveo_domain = serveo_entry.get('serveo_domain')
+        serveo_subdomain = serveo_domain.split(".")[0]
+        print(f"✅ Using predefined Serveo domain: {serveo_domain}")
+    
+    # Ensure SSH key is accepted automatically
+    print("Setting up SSH for Serveo...", flush=True)
+    subprocess.run(["mkdir", "-p", "~/.ssh"], shell=True)
+    subprocess.run(["touch", "~/.ssh/known_hosts"], shell=True)
+    subprocess.run(["ssh-keyscan", "-H", "serveo.net", ">>", "~/.ssh/known_hosts"], shell=True)
+    
+    # Start the SSH tunnel
+    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"{serveo_subdomain}:25565:localhost:25565", "serveo.net"]
+    print(f"Starting Serveo tunnel with command: {' '.join(cmd)}", flush=True)
+    
+    # Start the tunnel process
+    tunnel_process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1,
+        env=os.environ.copy()
+    )
+    
+    # Save the actual serveo domain to the config
+    config['serveo_domain'] = serveo_domain
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    commit_and_push(config_path, f"Update Serveo domain for {server_id}")
+    
+    # Monitor output to verify the connection
+    def monitor_serveo_output():
+        tunnel_verified = False
+        for line in iter(tunnel_process.stdout.readline, ''):
+            print(f"SERVEO: {line.strip()}", flush=True)
+            
+            # Look for successful connection
+            if "Forwarding" in line and "serveo.net" in line:
+                verified_domain = re.search(r'to ([a-zA-Z0-9.-]+\.serveo\.net)', line)
+                if verified_domain:
+                    assigned_domain = verified_domain.group(1)
+                    tunnel_verified = True
+                    print("\n" + "="*70)
+                    print(f"✨ SERVEO TUNNEL ESTABLISHED! ✨")
+                    print(f"Connect to Minecraft using: {assigned_domain}")
+                    print("="*70 + "\n")
+            
+            # Look for errors
+            if "Error" in line or "error" in line:
+                print(f"⚠️ Serveo tunnel error detected: {line.strip()}")
+    
+    threading.Thread(target=monitor_serveo_output, daemon=True).start()
+    
+    # Wait for connection to establish
+    time.sleep(5)
+    
+    return tunnel_process
+
 def write_tunnel_creds_file(subdomain):
     """Extract credentials for a specific tunnel and write to file."""
     tunnel_map_path = os.path.join(BASE_DIR, "tunnel_id_map.json")
@@ -760,7 +852,8 @@ if __name__ == "__main__":
             sys.exit(1)
 
         tunnel_name = config.get('subdomain')
-        tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
+        tunnel_process = setup_serveo_tunnel(server_id)
+        serveo_process = setup_serveo_tunnel(server_id)
 
         # Add server binding verification
         print("\n" + "="*70)
@@ -797,36 +890,7 @@ if __name__ == "__main__":
 
         print("="*70)
         print(f"✨ MINECRAFT SERVER READY! ✨")
-
-        print(f"📌 PRIMARY CONNECTION: {config.get('subdomain')}.rileyberycz.co.uk")
-        
-        if 'tunnel_id' in config:
-            print(f"📌 BACKUP CONNECTION: {config['tunnel_id']}.cfargotunnel.com")
-        else:
-            try:
-                with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
-                    tunnel_map = json.load(f)
-                
-                fqdn = f"{config.get('subdomain')}.rileyberycz.co.uk"
-                if fqdn in tunnel_map:
-                    if isinstance(tunnel_map[fqdn], dict):
-                        map_tunnel_id = tunnel_map[fqdn].get("tunnel_id")
-                    else:
-                        map_tunnel_id = tunnel_map[fqdn]
-                        
-                    if map_tunnel_id:
-                        print(f"📌 BACKUP CONNECTION: {map_tunnel_id}.cfargotunnel.com")
-            except Exception:
-                pass
-        
-        try:
-            is_proxied = is_dns_proxied(f"{config.get('subdomain')}.rileyberycz.co.uk")
-            if not is_proxied:
-                print(f"⚠️ WARNING: Your DNS record appears to be 'DNS only' (gray cloud)")
-                print(f"⚠️ Please change to 'Proxied' (orange cloud) in Cloudflare DNS settings")
-        except Exception:
-            pass
-            
+        print(f"📌 CONNECT USING: {config.get('serveo_domain')}")
         print(f"🎮 Minecraft version: 1.20.4")
         print("="*70 + "\n")
 
@@ -903,7 +967,8 @@ if __name__ == "__main__":
                         sys.exit(1)
                         
                     tunnel_name = config.get('subdomain')
-                    tunnel_process = setup_cloudflared_tunnel(config.get('subdomain'), tunnel_name)
+                    tunnel_process = setup_serveo_tunnel(server_id)
+                    serveo_process = setup_serveo_tunnel(server_id)
                     
                     start_time = time.time()
                     last_backup_time = start_time
@@ -967,6 +1032,8 @@ if __name__ == "__main__":
             server_process.terminate()
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
+            if 'serveo_process' in locals():
+                serveo_process.terminate()
         finally:
             ensure_server_inactive(server_id)
         sys.exit(0)
