@@ -1,20 +1,20 @@
-[15:04:48] [ServerMain/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
-[15:04:49] [ServerMain/INFO]: Loaded 7 recipes
-[15:04:50] [ServerMain/INFO]: Loaded 1271 advancements
-[15:04:50] [Server thread/INFO]: Starting minecraft server version 1.20.4
-[15:04:50] [Server thread/INFO]: Loading properties
-[15:04:50] [Server thread/INFO]: Default game type: SURVIVAL
-[15:04:50] [Server thread/INFO]: Generating keypair
-[15:04:50] [Server thread/INFO]: Starting Minecraft server on 0.0.0.0:25565
-[15:04:50] [Server thread/INFO]: Using epoll channel type
-[15:04:50] [Server thread/INFO]: Preparing level "world"
-[15:04:53] [Server thread/INFO]: Preparing start region for dimension minecraft:overworld
-[15:04:55] [Worker-Main-3/INFO]: Preparing spawn area: 0%
-[15:04:55] [Worker-Main-3/INFO]: Preparing spawn area: 0%
-[15:04:55] [Worker-Main-3/INFO]: Preparing spawn area: 0%
-[15:04:55] [Worker-Main-3/INFO]: Preparing spawn area: 0%
-[15:04:55] [Worker-Main-3/INFO]: Preparing spawn area: 0%
-[15:04:55] [Worker-Main-1/INFO]: Preparing spawn area: 0%
-[15:04:56] [Worker-Main-1/INFO]: Preparing spawn area: 55%
-[15:04:56] [Server thread/INFO]: Time elapsed: 3287 ms
-[15:04:56] [Server thread/INFO]: Done (5.661s)! For help, type "help"
+[13:38:25] [ServerMain/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[13:38:27] [ServerMain/INFO]: Loaded 7 recipes
+[13:38:27] [ServerMain/INFO]: Loaded 1271 advancements
+[13:38:28] [Server thread/INFO]: Starting minecraft server version 1.20.4
+[13:38:28] [Server thread/INFO]: Loading properties
+[13:38:28] [Server thread/INFO]: Default game type: SURVIVAL
+[13:38:28] [Server thread/INFO]: Generating keypair
+[13:38:28] [Server thread/INFO]: Starting Minecraft server on 0.0.0.0:25565
+[13:38:28] [Server thread/INFO]: Using epoll channel type
+[13:38:28] [Server thread/INFO]: Preparing level "world"
+[13:38:30] [Server thread/INFO]: Preparing start region for dimension minecraft:overworld
+[13:38:33] [Worker-Main-1/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-2/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-2/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-2/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-2/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-2/INFO]: Preparing spawn area: 0%
+[13:38:33] [Worker-Main-3/INFO]: Preparing spawn area: 20%
+[13:38:34] [Server thread/INFO]: Time elapsed: 3461 ms
+[13:38:34] [Server thread/INFO]: Done (5.779s)! For help, type "help"
