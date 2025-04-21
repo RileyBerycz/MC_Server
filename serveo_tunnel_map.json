@@ -1,402 +1,502 @@
 {
-  "minecraft-001": {
-    "subdomain": "mc-7pr3-edbq-bd31-l0se",
+  "minecraft-test": {
+    "original_subdomain": "minecraft-001",
+    "updated_subdomain": "minecraft-test",
     "serveo_domain": "mc-7pr3-edbq-bd31-l0se.serveo.net"
   },
   "minecraft-002": {
-    "subdomain": "mc-wmvd-7geb-hvw2-9eo9",
+    "original_subdomain": "minecraft-002",
+    "updated_subdomain": "",
     "serveo_domain": "mc-wmvd-7geb-hvw2-9eo9.serveo.net"
   },
   "minecraft-003": {
-    "subdomain": "mc-1pb3-y3fp-m9ho-veh8",
+    "original_subdomain": "minecraft-003",
+    "updated_subdomain": "",
     "serveo_domain": "mc-1pb3-y3fp-m9ho-veh8.serveo.net"
   },
   "minecraft-004": {
-    "subdomain": "mc-uvau-332v-9neu-o0pa",
+    "original_subdomain": "minecraft-004",
+    "updated_subdomain": "",
     "serveo_domain": "mc-uvau-332v-9neu-o0pa.serveo.net"
   },
   "minecraft-005": {
-    "subdomain": "mc-7lue-8vqi-wxnr-ppbq",
+    "original_subdomain": "minecraft-005",
+    "updated_subdomain": "",
     "serveo_domain": "mc-7lue-8vqi-wxnr-ppbq.serveo.net"
   },
   "minecraft-006": {
-    "subdomain": "mc-zvua-hudy-btbf-lk3n",
+    "original_subdomain": "minecraft-006",
+    "updated_subdomain": "",
     "serveo_domain": "mc-zvua-hudy-btbf-lk3n.serveo.net"
   },
   "minecraft-007": {
-    "subdomain": "mc-zy5z-dpfd-emsk-u0a5",
+    "original_subdomain": "minecraft-007",
+    "updated_subdomain": "",
     "serveo_domain": "mc-zy5z-dpfd-emsk-u0a5.serveo.net"
   },
   "minecraft-008": {
-    "subdomain": "mc-6khl-sbyn-9tla-z6f8",
+    "original_subdomain": "minecraft-008",
+    "updated_subdomain": "",
     "serveo_domain": "mc-6khl-sbyn-9tla-z6f8.serveo.net"
   },
   "minecraft-009": {
-    "subdomain": "mc-eoat-b34d-iw3g-mxrn",
+    "original_subdomain": "minecraft-009",
+    "updated_subdomain": "",
     "serveo_domain": "mc-eoat-b34d-iw3g-mxrn.serveo.net"
   },
   "minecraft-010": {
-    "subdomain": "mc-caov-tozj-jb8m-yowl",
+    "original_subdomain": "minecraft-010",
+    "updated_subdomain": "",
     "serveo_domain": "mc-caov-tozj-jb8m-yowl.serveo.net"
   },
   "minecraft-011": {
-    "subdomain": "mc-h7cv-y647-echo-6cpk",
+    "original_subdomain": "minecraft-011",
+    "updated_subdomain": "",
     "serveo_domain": "mc-h7cv-y647-echo-6cpk.serveo.net"
   },
   "minecraft-012": {
-    "subdomain": "mc-bssy-k0t7-k98o-m56x",
+    "original_subdomain": "minecraft-012",
+    "updated_subdomain": "",
     "serveo_domain": "mc-bssy-k0t7-k98o-m56x.serveo.net"
   },
   "minecraft-013": {
-    "subdomain": "mc-8dm2-ftzg-4w5p-28mv",
+    "original_subdomain": "minecraft-013",
+    "updated_subdomain": "",
     "serveo_domain": "mc-8dm2-ftzg-4w5p-28mv.serveo.net"
   },
   "minecraft-014": {
-    "subdomain": "mc-5fnr-xjqy-d510-kowc",
+    "original_subdomain": "minecraft-014",
+    "updated_subdomain": "",
     "serveo_domain": "mc-5fnr-xjqy-d510-kowc.serveo.net"
   },
   "minecraft-015": {
-    "subdomain": "mc-we4g-qq4w-s812-ef7x",
+    "original_subdomain": "minecraft-015",
+    "updated_subdomain": "",
     "serveo_domain": "mc-we4g-qq4w-s812-ef7x.serveo.net"
   },
   "minecraft-016": {
-    "subdomain": "mc-l2v2-4x33-0vm8-mc09",
+    "original_subdomain": "minecraft-016",
+    "updated_subdomain": "",
     "serveo_domain": "mc-l2v2-4x33-0vm8-mc09.serveo.net"
   },
   "minecraft-017": {
-    "subdomain": "mc-cl40-3fk1-dr68-86tw",
+    "original_subdomain": "minecraft-017",
+    "updated_subdomain": "",
     "serveo_domain": "mc-cl40-3fk1-dr68-86tw.serveo.net"
   },
   "minecraft-018": {
-    "subdomain": "mc-qxkg-3jpy-q88j-nt4m",
+    "original_subdomain": "minecraft-018",
+    "updated_subdomain": "",
     "serveo_domain": "mc-qxkg-3jpy-q88j-nt4m.serveo.net"
   },
   "minecraft-019": {
-    "subdomain": "mc-130n-nxo4-6fm1-a44l",
+    "original_subdomain": "minecraft-019",
+    "updated_subdomain": "",
     "serveo_domain": "mc-130n-nxo4-6fm1-a44l.serveo.net"
   },
   "minecraft-020": {
-    "subdomain": "mc-a2s5-2yf4-6ze1-q4eb",
+    "original_subdomain": "minecraft-020",
+    "updated_subdomain": "",
     "serveo_domain": "mc-a2s5-2yf4-6ze1-q4eb.serveo.net"
   },
   "minecraft-021": {
-    "subdomain": "mc-542t-lo4l-bcer-lmp1",
+    "original_subdomain": "minecraft-021",
+    "updated_subdomain": "",
     "serveo_domain": "mc-542t-lo4l-bcer-lmp1.serveo.net"
   },
   "minecraft-022": {
-    "subdomain": "mc-j5da-6ht2-1pim-2e3o",
+    "original_subdomain": "minecraft-022",
+    "updated_subdomain": "",
     "serveo_domain": "mc-j5da-6ht2-1pim-2e3o.serveo.net"
   },
   "minecraft-023": {
-    "subdomain": "mc-g1ye-msqk-81aq-4g08",
+    "original_subdomain": "minecraft-023",
+    "updated_subdomain": "",
     "serveo_domain": "mc-g1ye-msqk-81aq-4g08.serveo.net"
   },
   "minecraft-024": {
-    "subdomain": "mc-v3pg-4nav-6rwv-6a7t",
+    "original_subdomain": "minecraft-024",
+    "updated_subdomain": "",
     "serveo_domain": "mc-v3pg-4nav-6rwv-6a7t.serveo.net"
   },
   "minecraft-025": {
-    "subdomain": "mc-c0ma-6b3u-zrtu-lltk",
+    "original_subdomain": "minecraft-025",
+    "updated_subdomain": "",
     "serveo_domain": "mc-c0ma-6b3u-zrtu-lltk.serveo.net"
   },
   "minecraft-026": {
-    "subdomain": "mc-vw84-wpyj-i4ow-46pa",
+    "original_subdomain": "minecraft-026",
+    "updated_subdomain": "",
     "serveo_domain": "mc-vw84-wpyj-i4ow-46pa.serveo.net"
   },
   "minecraft-027": {
-    "subdomain": "mc-yzz5-vlpb-nhnw-ndrd",
+    "original_subdomain": "minecraft-027",
+    "updated_subdomain": "",
     "serveo_domain": "mc-yzz5-vlpb-nhnw-ndrd.serveo.net"
   },
   "minecraft-028": {
-    "subdomain": "mc-2qjt-0x0h-pyco-84cd",
+    "original_subdomain": "minecraft-028",
+    "updated_subdomain": "",
     "serveo_domain": "mc-2qjt-0x0h-pyco-84cd.serveo.net"
   },
   "minecraft-029": {
-    "subdomain": "mc-0ita-6o97-jw26-s24x",
+    "original_subdomain": "minecraft-029",
+    "updated_subdomain": "",
     "serveo_domain": "mc-0ita-6o97-jw26-s24x.serveo.net"
   },
   "minecraft-030": {
-    "subdomain": "mc-kzk6-t4h4-8vm2-xpxf",
+    "original_subdomain": "minecraft-030",
+    "updated_subdomain": "",
     "serveo_domain": "mc-kzk6-t4h4-8vm2-xpxf.serveo.net"
   },
   "minecraft-031": {
-    "subdomain": "mc-8yzu-pw2w-fath-hywu",
+    "original_subdomain": "minecraft-031",
+    "updated_subdomain": "",
     "serveo_domain": "mc-8yzu-pw2w-fath-hywu.serveo.net"
   },
   "minecraft-032": {
-    "subdomain": "mc-k0k4-c4ll-ihut-9slj",
+    "original_subdomain": "minecraft-032",
+    "updated_subdomain": "",
     "serveo_domain": "mc-k0k4-c4ll-ihut-9slj.serveo.net"
   },
   "minecraft-033": {
-    "subdomain": "mc-lf3o-upt2-h5da-k9wy",
+    "original_subdomain": "minecraft-033",
+    "updated_subdomain": "",
     "serveo_domain": "mc-lf3o-upt2-h5da-k9wy.serveo.net"
   },
   "minecraft-034": {
-    "subdomain": "mc-yh1t-7xr6-3yqs-8qok",
+    "original_subdomain": "minecraft-034",
+    "updated_subdomain": "",
     "serveo_domain": "mc-yh1t-7xr6-3yqs-8qok.serveo.net"
   },
   "minecraft-035": {
-    "subdomain": "mc-mxgp-ugso-fzw4-q78m",
+    "original_subdomain": "minecraft-035",
+    "updated_subdomain": "",
     "serveo_domain": "mc-mxgp-ugso-fzw4-q78m.serveo.net"
   },
   "minecraft-036": {
-    "subdomain": "mc-z1cs-9hsi-65gw-o644",
+    "original_subdomain": "minecraft-036",
+    "updated_subdomain": "",
     "serveo_domain": "mc-z1cs-9hsi-65gw-o644.serveo.net"
   },
   "minecraft-037": {
-    "subdomain": "mc-0iqm-y9pb-acjg-a9sj",
+    "original_subdomain": "minecraft-037",
+    "updated_subdomain": "",
     "serveo_domain": "mc-0iqm-y9pb-acjg-a9sj.serveo.net"
   },
   "minecraft-038": {
-    "subdomain": "mc-gmmr-or3n-18i9-pz1s",
+    "original_subdomain": "minecraft-038",
+    "updated_subdomain": "",
     "serveo_domain": "mc-gmmr-or3n-18i9-pz1s.serveo.net"
   },
   "minecraft-039": {
-    "subdomain": "mc-caa1-85uz-xrnk-dbyh",
+    "original_subdomain": "minecraft-039",
+    "updated_subdomain": "",
     "serveo_domain": "mc-caa1-85uz-xrnk-dbyh.serveo.net"
   },
   "minecraft-040": {
-    "subdomain": "mc-kvig-s1o3-uwz2-cfmx",
+    "original_subdomain": "minecraft-040",
+    "updated_subdomain": "",
     "serveo_domain": "mc-kvig-s1o3-uwz2-cfmx.serveo.net"
   },
   "minecraft-041": {
-    "subdomain": "mc-pzdu-ois7-mohk-8zis",
+    "original_subdomain": "minecraft-041",
+    "updated_subdomain": "",
     "serveo_domain": "mc-pzdu-ois7-mohk-8zis.serveo.net"
   },
   "minecraft-042": {
-    "subdomain": "mc-rqp3-6uu0-dztl-vl27",
+    "original_subdomain": "minecraft-042",
+    "updated_subdomain": "",
     "serveo_domain": "mc-rqp3-6uu0-dztl-vl27.serveo.net"
   },
   "minecraft-043": {
-    "subdomain": "mc-elax-6yim-14k4-6ee9",
+    "original_subdomain": "minecraft-043",
+    "updated_subdomain": "",
     "serveo_domain": "mc-elax-6yim-14k4-6ee9.serveo.net"
   },
   "minecraft-044": {
-    "subdomain": "mc-r0cs-yrs2-ewdj-gyxn",
+    "original_subdomain": "minecraft-044",
+    "updated_subdomain": "",
     "serveo_domain": "mc-r0cs-yrs2-ewdj-gyxn.serveo.net"
   },
   "minecraft-045": {
-    "subdomain": "mc-8dtg-5rsa-8mcv-o1hm",
+    "original_subdomain": "minecraft-045",
+    "updated_subdomain": "",
     "serveo_domain": "mc-8dtg-5rsa-8mcv-o1hm.serveo.net"
   },
   "minecraft-046": {
-    "subdomain": "mc-wigs-6xy0-7pp9-avo4",
+    "original_subdomain": "minecraft-046",
+    "updated_subdomain": "",
     "serveo_domain": "mc-wigs-6xy0-7pp9-avo4.serveo.net"
   },
   "minecraft-047": {
-    "subdomain": "mc-ehcq-0cp2-c1dn-cmgg",
+    "original_subdomain": "minecraft-047",
+    "updated_subdomain": "",
     "serveo_domain": "mc-ehcq-0cp2-c1dn-cmgg.serveo.net"
   },
   "minecraft-048": {
-    "subdomain": "mc-ava3-76ws-8yqm-9657",
+    "original_subdomain": "minecraft-048",
+    "updated_subdomain": "",
     "serveo_domain": "mc-ava3-76ws-8yqm-9657.serveo.net"
   },
   "minecraft-049": {
-    "subdomain": "mc-yt0l-gok9-9rah-e4yr",
+    "original_subdomain": "minecraft-049",
+    "updated_subdomain": "",
     "serveo_domain": "mc-yt0l-gok9-9rah-e4yr.serveo.net"
   },
   "minecraft-050": {
-    "subdomain": "mc-21hu-k6pg-wrvt-c79d",
+    "original_subdomain": "minecraft-050",
+    "updated_subdomain": "",
     "serveo_domain": "mc-21hu-k6pg-wrvt-c79d.serveo.net"
   },
   "minecraft-051": {
-    "subdomain": "mc-6v0t-xp5k-84bv-g1r5",
+    "original_subdomain": "minecraft-051",
+    "updated_subdomain": "",
     "serveo_domain": "mc-6v0t-xp5k-84bv-g1r5.serveo.net"
   },
   "minecraft-052": {
-    "subdomain": "mc-hr5c-vmw0-8s2b-b9c1",
+    "original_subdomain": "minecraft-052",
+    "updated_subdomain": "",
     "serveo_domain": "mc-hr5c-vmw0-8s2b-b9c1.serveo.net"
   },
   "minecraft-053": {
-    "subdomain": "mc-wcs4-yh10-xz1m-6j56",
+    "original_subdomain": "minecraft-053",
+    "updated_subdomain": "",
     "serveo_domain": "mc-wcs4-yh10-xz1m-6j56.serveo.net"
   },
   "minecraft-054": {
-    "subdomain": "mc-ljwi-9hg2-y3yj-rmtz",
+    "original_subdomain": "minecraft-054",
+    "updated_subdomain": "",
     "serveo_domain": "mc-ljwi-9hg2-y3yj-rmtz.serveo.net"
   },
   "minecraft-055": {
-    "subdomain": "mc-n2hq-32k6-pxra-qzv8",
+    "original_subdomain": "minecraft-055",
+    "updated_subdomain": "",
     "serveo_domain": "mc-n2hq-32k6-pxra-qzv8.serveo.net"
   },
   "minecraft-056": {
-    "subdomain": "mc-3fp2-kzbf-c3go-hgmw",
+    "original_subdomain": "minecraft-056",
+    "updated_subdomain": "",
     "serveo_domain": "mc-3fp2-kzbf-c3go-hgmw.serveo.net"
   },
   "minecraft-057": {
-    "subdomain": "mc-q366-bwgp-v47h-vdng",
+    "original_subdomain": "minecraft-057",
+    "updated_subdomain": "",
     "serveo_domain": "mc-q366-bwgp-v47h-vdng.serveo.net"
   },
   "minecraft-058": {
-    "subdomain": "mc-l45y-gb8x-42c9-41wb",
+    "original_subdomain": "minecraft-058",
+    "updated_subdomain": "",
     "serveo_domain": "mc-l45y-gb8x-42c9-41wb.serveo.net"
   },
   "minecraft-059": {
-    "subdomain": "mc-lwa4-0y8u-x6p1-6ugv",
+    "original_subdomain": "minecraft-059",
+    "updated_subdomain": "",
     "serveo_domain": "mc-lwa4-0y8u-x6p1-6ugv.serveo.net"
   },
   "minecraft-060": {
-    "subdomain": "mc-o54b-mrl0-v2t7-8cpe",
+    "original_subdomain": "minecraft-060",
+    "updated_subdomain": "",
     "serveo_domain": "mc-o54b-mrl0-v2t7-8cpe.serveo.net"
   },
   "minecraft-061": {
-    "subdomain": "mc-tb6c-rajd-f8h8-8q3c",
+    "original_subdomain": "minecraft-061",
+    "updated_subdomain": "",
     "serveo_domain": "mc-tb6c-rajd-f8h8-8q3c.serveo.net"
   },
   "minecraft-062": {
-    "subdomain": "mc-l9ka-a48h-cthi-fzu0",
+    "original_subdomain": "minecraft-062",
+    "updated_subdomain": "",
     "serveo_domain": "mc-l9ka-a48h-cthi-fzu0.serveo.net"
   },
   "minecraft-063": {
-    "subdomain": "mc-7v03-ub30-wct2-hv00",
+    "original_subdomain": "minecraft-063",
+    "updated_subdomain": "",
     "serveo_domain": "mc-7v03-ub30-wct2-hv00.serveo.net"
   },
   "minecraft-064": {
-    "subdomain": "mc-eqlm-wbok-a2jw-6oui",
+    "original_subdomain": "minecraft-064",
+    "updated_subdomain": "",
     "serveo_domain": "mc-eqlm-wbok-a2jw-6oui.serveo.net"
   },
   "minecraft-065": {
-    "subdomain": "mc-kxv5-xbsv-m0iu-hxy6",
+    "original_subdomain": "minecraft-065",
+    "updated_subdomain": "",
     "serveo_domain": "mc-kxv5-xbsv-m0iu-hxy6.serveo.net"
   },
   "minecraft-066": {
-    "subdomain": "mc-6ndw-xo06-hlzm-9cme",
+    "original_subdomain": "minecraft-066",
+    "updated_subdomain": "",
     "serveo_domain": "mc-6ndw-xo06-hlzm-9cme.serveo.net"
   },
   "minecraft-067": {
-    "subdomain": "mc-ondo-umml-7pp4-h7s3",
+    "original_subdomain": "minecraft-067",
+    "updated_subdomain": "",
     "serveo_domain": "mc-ondo-umml-7pp4-h7s3.serveo.net"
   },
   "minecraft-068": {
-    "subdomain": "mc-iayc-wlic-o45k-flvt",
+    "original_subdomain": "minecraft-068",
+    "updated_subdomain": "",
     "serveo_domain": "mc-iayc-wlic-o45k-flvt.serveo.net"
   },
   "minecraft-069": {
-    "subdomain": "mc-eto1-d14i-8jte-x14f",
+    "original_subdomain": "minecraft-069",
+    "updated_subdomain": "",
     "serveo_domain": "mc-eto1-d14i-8jte-x14f.serveo.net"
   },
   "minecraft-070": {
-    "subdomain": "mc-x8ex-3f3p-p2gp-x7mx",
+    "original_subdomain": "minecraft-070",
+    "updated_subdomain": "",
     "serveo_domain": "mc-x8ex-3f3p-p2gp-x7mx.serveo.net"
   },
   "minecraft-071": {
-    "subdomain": "mc-243t-ge8g-wogn-nbz7",
+    "original_subdomain": "minecraft-071",
+    "updated_subdomain": "",
     "serveo_domain": "mc-243t-ge8g-wogn-nbz7.serveo.net"
   },
   "minecraft-072": {
-    "subdomain": "mc-qy5q-n6d1-vrj4-et67",
+    "original_subdomain": "minecraft-072",
+    "updated_subdomain": "",
     "serveo_domain": "mc-qy5q-n6d1-vrj4-et67.serveo.net"
   },
   "minecraft-073": {
-    "subdomain": "mc-l8i3-y1uv-yor4-a3s8",
+    "original_subdomain": "minecraft-073",
+    "updated_subdomain": "",
     "serveo_domain": "mc-l8i3-y1uv-yor4-a3s8.serveo.net"
   },
   "minecraft-074": {
-    "subdomain": "mc-4us2-8dq5-kj8w-ft17",
+    "original_subdomain": "minecraft-074",
+    "updated_subdomain": "",
     "serveo_domain": "mc-4us2-8dq5-kj8w-ft17.serveo.net"
   },
   "minecraft-075": {
-    "subdomain": "mc-6f84-bdht-hmz5-ufnt",
+    "original_subdomain": "minecraft-075",
+    "updated_subdomain": "",
     "serveo_domain": "mc-6f84-bdht-hmz5-ufnt.serveo.net"
   },
   "minecraft-076": {
-    "subdomain": "mc-20s4-xqd4-httb-b3yr",
+    "original_subdomain": "minecraft-076",
+    "updated_subdomain": "",
     "serveo_domain": "mc-20s4-xqd4-httb-b3yr.serveo.net"
   },
   "minecraft-077": {
-    "subdomain": "mc-idy0-3ado-rc44-35op",
+    "original_subdomain": "minecraft-077",
+    "updated_subdomain": "",
     "serveo_domain": "mc-idy0-3ado-rc44-35op.serveo.net"
   },
   "minecraft-078": {
-    "subdomain": "mc-z8rb-ixv6-beg6-d5v3",
+    "original_subdomain": "minecraft-078",
+    "updated_subdomain": "",
     "serveo_domain": "mc-z8rb-ixv6-beg6-d5v3.serveo.net"
   },
   "minecraft-079": {
-    "subdomain": "mc-jiwv-8j8u-5k3u-u9qn",
+    "original_subdomain": "minecraft-079",
+    "updated_subdomain": "",
     "serveo_domain": "mc-jiwv-8j8u-5k3u-u9qn.serveo.net"
   },
   "minecraft-080": {
-    "subdomain": "mc-rzsc-u2pf-xpk6-8krz",
+    "original_subdomain": "minecraft-080",
+    "updated_subdomain": "",
     "serveo_domain": "mc-rzsc-u2pf-xpk6-8krz.serveo.net"
   },
   "minecraft-081": {
-    "subdomain": "mc-e2yk-15zw-mud7-1nq2",
+    "original_subdomain": "minecraft-081",
+    "updated_subdomain": "",
     "serveo_domain": "mc-e2yk-15zw-mud7-1nq2.serveo.net"
   },
   "minecraft-082": {
-    "subdomain": "mc-7axl-h3ka-7jyl-j2ty",
+    "original_subdomain": "minecraft-082",
+    "updated_subdomain": "",
     "serveo_domain": "mc-7axl-h3ka-7jyl-j2ty.serveo.net"
   },
   "minecraft-083": {
-    "subdomain": "mc-tpro-m1gc-0rk4-9gwq",
+    "original_subdomain": "minecraft-083",
+    "updated_subdomain": "",
     "serveo_domain": "mc-tpro-m1gc-0rk4-9gwq.serveo.net"
   },
   "minecraft-084": {
-    "subdomain": "mc-fzo6-x9u1-fsbb-6poc",
+    "original_subdomain": "minecraft-084",
+    "updated_subdomain": "",
     "serveo_domain": "mc-fzo6-x9u1-fsbb-6poc.serveo.net"
   },
   "minecraft-085": {
-    "subdomain": "mc-3ujw-rhk0-eb8y-4it0",
+    "original_subdomain": "minecraft-085",
+    "updated_subdomain": "",
     "serveo_domain": "mc-3ujw-rhk0-eb8y-4it0.serveo.net"
   },
   "minecraft-086": {
-    "subdomain": "mc-v07a-xylb-cig2-mt0o",
+    "original_subdomain": "minecraft-086",
+    "updated_subdomain": "",
     "serveo_domain": "mc-v07a-xylb-cig2-mt0o.serveo.net"
   },
   "minecraft-087": {
-    "subdomain": "mc-kkbv-lj3f-br6i-tv58",
+    "original_subdomain": "minecraft-087",
+    "updated_subdomain": "",
     "serveo_domain": "mc-kkbv-lj3f-br6i-tv58.serveo.net"
   },
   "minecraft-088": {
-    "subdomain": "mc-noag-qi93-rhax-q7qy",
+    "original_subdomain": "minecraft-088",
+    "updated_subdomain": "",
     "serveo_domain": "mc-noag-qi93-rhax-q7qy.serveo.net"
   },
   "minecraft-089": {
-    "subdomain": "mc-o0m2-qu3d-lfqj-mv6t",
+    "original_subdomain": "minecraft-089",
+    "updated_subdomain": "",
     "serveo_domain": "mc-o0m2-qu3d-lfqj-mv6t.serveo.net"
   },
   "minecraft-090": {
-    "subdomain": "mc-tsd4-71de-drwl-78or",
+    "original_subdomain": "minecraft-090",
+    "updated_subdomain": "",
     "serveo_domain": "mc-tsd4-71de-drwl-78or.serveo.net"
   },
   "minecraft-091": {
-    "subdomain": "mc-jbj2-di0x-nlt1-ehz1",
+    "original_subdomain": "minecraft-091",
+    "updated_subdomain": "",
     "serveo_domain": "mc-jbj2-di0x-nlt1-ehz1.serveo.net"
   },
   "minecraft-092": {
-    "subdomain": "mc-ixeb-tsum-lvho-vkyu",
+    "original_subdomain": "minecraft-092",
+    "updated_subdomain": "",
     "serveo_domain": "mc-ixeb-tsum-lvho-vkyu.serveo.net"
   },
   "minecraft-093": {
-    "subdomain": "mc-zpd5-62fj-oh1e-h64a",
+    "original_subdomain": "minecraft-093",
+    "updated_subdomain": "",
     "serveo_domain": "mc-zpd5-62fj-oh1e-h64a.serveo.net"
   },
   "minecraft-094": {
-    "subdomain": "mc-jkgp-q557-38kd-7kt3",
+    "original_subdomain": "minecraft-094",
+    "updated_subdomain": "",
     "serveo_domain": "mc-jkgp-q557-38kd-7kt3.serveo.net"
   },
   "minecraft-095": {
-    "subdomain": "mc-bq54-5rur-sc51-zlqo",
+    "original_subdomain": "minecraft-095",
+    "updated_subdomain": "",
     "serveo_domain": "mc-bq54-5rur-sc51-zlqo.serveo.net"
   },
   "minecraft-096": {
-    "subdomain": "mc-evm7-lxb0-450j-r609",
+    "original_subdomain": "minecraft-096",
+    "updated_subdomain": "",
     "serveo_domain": "mc-evm7-lxb0-450j-r609.serveo.net"
   },
   "minecraft-097": {
-    "subdomain": "mc-kbgx-9ssc-3l4d-d40c",
+    "original_subdomain": "minecraft-097",
+    "updated_subdomain": "",
     "serveo_domain": "mc-kbgx-9ssc-3l4d-d40c.serveo.net"
   },
   "minecraft-098": {
-    "subdomain": "mc-58wt-e1a6-71y0-6jcb",
+    "original_subdomain": "minecraft-098",
+    "updated_subdomain": "",
     "serveo_domain": "mc-58wt-e1a6-71y0-6jcb.serveo.net"
   },
   "minecraft-099": {
-    "subdomain": "mc-rh6r-0jbe-uofi-h01m",
+    "original_subdomain": "minecraft-099",
+    "updated_subdomain": "",
     "serveo_domain": "mc-rh6r-0jbe-uofi-h01m.serveo.net"
   },
   "minecraft-100": {
-    "subdomain": "mc-fwtd-vsur-l520-lgqx",
+    "original_subdomain": "minecraft-100",
+    "updated_subdomain": "",
     "serveo_domain": "mc-fwtd-vsur-l520-lgqx.serveo.net"
   }
 }

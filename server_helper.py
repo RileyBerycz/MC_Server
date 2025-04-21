@@ -266,21 +266,43 @@ def setup_serveo_tunnel(server_id):
         config = json.load(f)
     
     subdomain = config.get('subdomain')
+    print(f"Server configured to use subdomain: {subdomain}")
     
     # Load the Serveo mapping
-    with open(os.path.join(BASE_DIR, "serveo_tunnel_map.json"), "r") as f:
-        serveo_map = json.load(f)
+    serveo_map_path = os.path.join(BASE_DIR, "serveo_tunnel_map.json")
+    if not os.path.exists(serveo_map_path):
+        print(f"⚠️ Serveo mapping file not found: {serveo_map_path}")
+        print("Creating empty mapping file")
+        with open(serveo_map_path, 'w') as f:
+            json.dump({}, f, indent=2)
+        serveo_map = {}
+    else:
+        try:
+            with open(serveo_map_path, "r") as f:
+                serveo_map = json.load(f)
+        except json.JSONDecodeError:
+            print("⚠️ Serveo mapping file is not valid JSON, creating empty mapping")
+            serveo_map = {}
     
-    # Find the corresponding entry in the serveo map
+    # Find the correct serveo entry
     serveo_entry = None
-    for mc_id, entry in serveo_map.items():
-        if entry.get('subdomain') == subdomain:
-            serveo_entry = entry
-            break
     
+    # First, try to find the subdomain as a direct key in the map
+    if subdomain in serveo_map:
+        serveo_entry = serveo_map[subdomain]
+        print(f"✅ Found direct match for subdomain {subdomain} in map")
+    else:
+        # If not found as a key, search through all entries
+        for key, entry in serveo_map.items():
+            # Check against updated_subdomain first, then original_subdomain
+            if entry.get('updated_subdomain') == subdomain or entry.get('original_subdomain') == subdomain:
+                serveo_entry = entry
+                print(f"✅ Found subdomain match in the map under key: {key}")
+                break
+    
+    # If still not found, use a random subdomain
     if not serveo_entry:
         print(f"⚠️ No Serveo mapping found for subdomain {subdomain}")
-        # Generate a random subdomain as fallback
         import random
         import string
         random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
@@ -292,11 +314,21 @@ def setup_serveo_tunnel(server_id):
         serveo_subdomain = serveo_domain.split(".")[0]
         print(f"✅ Using predefined Serveo domain: {serveo_domain}")
     
+    # Save the serveo domain to the config
+    config['serveo_domain'] = serveo_domain
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    commit_and_push(config_path, f"Update Serveo domain for {server_id}")
+    
     # Ensure SSH key is accepted automatically
     print("Setting up SSH for Serveo...", flush=True)
-    subprocess.run(["mkdir", "-p", "~/.ssh"], shell=True)
-    subprocess.run(["touch", "~/.ssh/known_hosts"], shell=True)
-    subprocess.run(["ssh-keyscan", "-H", "serveo.net", ">>", "~/.ssh/known_hosts"], shell=True)
+    home_dir = os.path.expanduser("~")
+    os.makedirs(f"{home_dir}/.ssh", exist_ok=True)
+    ssh_known_hosts = f"{home_dir}/.ssh/known_hosts"
+    if not os.path.exists(ssh_known_hosts):
+        open(ssh_known_hosts, 'a').close()
+    
+    subprocess.run(f"ssh-keyscan -H serveo.net >> {home_dir}/.ssh/known_hosts", shell=True)
     
     # Start the SSH tunnel
     cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"{serveo_subdomain}:25565:localhost:25565", "serveo.net"]
@@ -312,12 +344,6 @@ def setup_serveo_tunnel(server_id):
         env=os.environ.copy()
     )
     
-    # Save the actual serveo domain to the config
-    config['serveo_domain'] = serveo_domain
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
-    commit_and_push(config_path, f"Update Serveo domain for {server_id}")
-    
     # Monitor output to verify the connection
     def monitor_serveo_output():
         tunnel_verified = False
@@ -330,6 +356,14 @@ def setup_serveo_tunnel(server_id):
                 if verified_domain:
                     assigned_domain = verified_domain.group(1)
                     tunnel_verified = True
+                    
+                    # Update the config with the actual domain if different
+                    if assigned_domain != serveo_domain:
+                        config['serveo_domain'] = assigned_domain
+                        with open(config_path, 'w') as f:
+                            json.dump(config, f, indent=2)
+                        commit_and_push(config_path, f"Update with actual Serveo domain for {server_id}")
+                    
                     print("\n" + "="*70)
                     print(f"✨ SERVEO TUNNEL ESTABLISHED! ✨")
                     print(f"Connect to Minecraft using: {assigned_domain}")
@@ -695,13 +729,6 @@ def setup_temp_tcp_tunnel():
             print(f"TEMP-TCP: {line.strip()}", flush=True)
             
             if "trycloudflare.com" in line:
-                url_match = re.search(r'(https?://[^\s]+)', line)
-                if url_match:
-                    temp_url = url_match.group(1).replace("https://", "")
-                    print("\n" + "="*70)
-                    print(f"✨ TEMPORARY TCP TUNNEL CREATED! ✨")
-                    print(f"Connect to Minecraft using: {temp_url}")
-                    print(f"⚠️ Note: This uses Cloudflare's quick tunnels which may not work for all Minecraft clients")
                     print("="*70 + "\n")
     
     threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
@@ -803,41 +830,6 @@ if __name__ == "__main__":
         print("Could not load server config.")
         sys.exit(1)
 
-    print("\n" + "="*70)
-    print("VALIDATING TUNNEL CONFIGURATION")
-    print("="*70)
-    mismatches = validate_tunnel_map(config.get('subdomain'))
-    
-    fqdn = f"{config.get('subdomain')}.rileyberycz.co.uk"
-    current_server_mismatch = next((m for m in mismatches if m['fqdn'] == fqdn), None)
-    
-    if current_server_mismatch:
-        print("\n" + "!"*70)
-        print(f"⚠️ WARNING: TUNNEL ID MISMATCH DETECTED! ⚠️")
-        print(f"Your DNS points to: {current_server_mismatch['dns_tunnel_id']}")
-        print(f"Your config uses: {current_server_mismatch['map_tunnel_id']}")
-        print(f"CONNECTION MAY FAIL UNLESS YOU FIX THIS!")
-        print("!"*70 + "\n")
-        
-        print("Automatically fixing tunnel ID mismatch...")
-        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
-            tunnel_map = json.load(f)
-        
-        with open(os.path.join(BASE_DIR, "tunnel_id_map.json.backup"), "w") as f:
-            json.dump(tunnel_map, f, indent=2)
-            
-        tunnel_map[fqdn] = current_server_mismatch['dns_tunnel_id']
-        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "w") as f:
-            json.dump(tunnel_map, f, indent=2)
-        
-        print(f"✅ Updated tunnel_id_map.json to match DNS records")
-        print(f"✅ Committing changes to tunnel_id_map.json")
-        
-        commit_and_push(os.path.join(BASE_DIR, "tunnel_id_map.json"), 
-                       f"Fix tunnel ID for {fqdn} to match DNS ({current_server_mismatch['dns_tunnel_id']})")
-        
-        config['tunnel_id'] = current_server_mismatch['dns_tunnel_id']
-    
     address = config.get('address')
 
     if initialize_only:
@@ -853,7 +845,6 @@ if __name__ == "__main__":
 
         tunnel_name = config.get('subdomain')
         tunnel_process = setup_serveo_tunnel(server_id)
-        serveo_process = setup_serveo_tunnel(server_id)
 
         # Add server binding verification
         print("\n" + "="*70)
@@ -968,7 +959,6 @@ if __name__ == "__main__":
                         
                     tunnel_name = config.get('subdomain')
                     tunnel_process = setup_serveo_tunnel(server_id)
-                    serveo_process = setup_serveo_tunnel(server_id)
                     
                     start_time = time.time()
                     last_backup_time = start_time
@@ -1032,8 +1022,6 @@ if __name__ == "__main__":
             server_process.terminate()
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
-            if 'serveo_process' in locals():
-                serveo_process.terminate()
         finally:
             ensure_server_inactive(server_id)
         sys.exit(0)
