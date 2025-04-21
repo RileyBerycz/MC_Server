@@ -13,9 +13,9 @@
   "backup_interval": 1.0,
   "subdomain": "minecraft-test",
   "tunnel_url": "https://minecraft-test.rileyberycz.co.uk",
-  "last_started": 1745246651,
+  "last_started": 1745248053,
   "shutdown_request": false,
-  "last_stopped": 1745247117,
+  "last_stopped": 1745248101,
   "serveo_domain": "mc-7pr3-edbq-bd31-l0se.serveo.net",
   "pending_command": "",
   "last_command_response": "Sent: whitelist add __Rejection__"
