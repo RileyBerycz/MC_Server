@@ -265,60 +265,12 @@ def setup_serveo_tunnel(server_id):
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    subdomain = config.get('subdomain')
-    print(f"Server configured to use subdomain: {subdomain}")
-    
-    # Load the Serveo mapping
-    serveo_map_path = os.path.join(BASE_DIR, "serveo_tunnel_map.json")
-    if not os.path.exists(serveo_map_path):
-        print(f"⚠️ Serveo mapping file not found: {serveo_map_path}")
-        print("Creating empty mapping file")
-        with open(serveo_map_path, 'w') as f:
-            json.dump({}, f, indent=2)
-        serveo_map = {}
-    else:
-        try:
-            with open(serveo_map_path, "r") as f:
-                serveo_map = json.load(f)
-        except json.JSONDecodeError:
-            print("⚠️ Serveo mapping file is not valid JSON, creating empty mapping")
-            serveo_map = {}
-    
-    # Find the correct serveo entry
-    serveo_entry = None
-    
-    # First, try to find the subdomain as a direct key in the map
-    if subdomain in serveo_map:
-        serveo_entry = serveo_map[subdomain]
-        print(f"✅ Found direct match for subdomain {subdomain} in map")
-    else:
-        # If not found as a key, search through all entries
-        for key, entry in serveo_map.items():
-            # Check against updated_subdomain first, then original_subdomain
-            if entry.get('updated_subdomain') == subdomain or entry.get('original_subdomain') == subdomain:
-                serveo_entry = entry
-                print(f"✅ Found subdomain match in the map under key: {key}")
-                break
-    
-    # If still not found, use a random subdomain
-    if not serveo_entry:
-        print(f"⚠️ No Serveo mapping found for subdomain {subdomain}")
-        import random
-        import string
-        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        serveo_subdomain = f"mc-{random_id}"
-        serveo_domain = f"{serveo_subdomain}.serveo.net"
-        print(f"✅ Using generated Serveo subdomain: {serveo_subdomain}")
-    else:
-        serveo_domain = serveo_entry.get('serveo_domain')
-        serveo_subdomain = serveo_domain.split(".")[0]
-        print(f"✅ Using predefined Serveo domain: {serveo_domain}")
-    
-    # Save the serveo domain to the config
-    config['serveo_domain'] = serveo_domain
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
-    commit_and_push(config_path, f"Update Serveo domain for {server_id}")
+    # Generate a completely random subdomain
+    import random
+    import string
+    random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+    serveo_subdomain = f"mc-{random_id}"
+    print(f"✅ Using randomly generated Serveo subdomain: {serveo_subdomain}")
     
     # Ensure SSH key is accepted automatically
     print("Setting up SSH for Serveo...", flush=True)
@@ -330,8 +282,8 @@ def setup_serveo_tunnel(server_id):
     
     subprocess.run(f"ssh-keyscan -H serveo.net >> {home_dir}/.ssh/known_hosts", shell=True)
     
-    # Start the SSH tunnel
-    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"{serveo_subdomain}:25565:localhost:25565", "serveo.net"]
+    # Start the SSH tunnel with random port assignment (::)
+    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"{serveo_subdomain}::25565", "serveo.net"]
     print(f"Starting Serveo tunnel with command: {' '.join(cmd)}", flush=True)
     
     # Start the tunnel process
@@ -352,27 +304,26 @@ def setup_serveo_tunnel(server_id):
             
             # Look for successful connection
             if "Forwarding" in line and "serveo.net" in line:
-                verified_domain = re.search(r'to ([a-zA-Z0-9.-]+\.serveo\.net)', line)
-                if verified_domain:
-                    assigned_domain = verified_domain.group(1)
+                # Capture both domain and port if available
+                tunnel_info = re.search(r'([a-zA-Z0-9.-]+\.serveo\.net(?::\d+)?)', line)
+                if tunnel_info:
+                    assigned_endpoint = tunnel_info.group(1)
                     tunnel_verified = True
                     
-                    # Update the config with the actual domain if different
-                    if assigned_domain != serveo_domain:
-                        config['serveo_domain'] = assigned_domain
-                        with open(config_path, 'w') as f:
-                            json.dump(config, f, indent=2)
-                        commit_and_push(config_path, f"Update with actual Serveo domain for {server_id}")
-                    
-                    # Update Cloudflare DNS to point to this domain
-                    update_cloudflare_dns(server_id, assigned_domain)
+                    # Update the config with the actual domain
+                    config['serveo_domain'] = assigned_endpoint
+                    with open(config_path, 'w') as f:
+                        json.dump(config, f, indent=2)
+                    commit_and_push(config_path, f"Update with actual Serveo domain for {server_id}")
                     
                     print("\n" + "="*70)
                     print(f"✨ SERVEO TUNNEL ESTABLISHED! ✨")
-                    print(f"Connect to Minecraft using: {assigned_domain}")
-                    if config.get('cloudflare_domain'):
-                        print(f"Or use permanent address: {config.get('cloudflare_domain')}")
+                    print(f"Connect to Minecraft using: {assigned_endpoint}")
                     print("="*70 + "\n")
+            
+            # Look for errors
+            if "Error" in line or "error" in line or "denied" in line:
+                print(f"⚠️ Serveo tunnel error detected: {line.strip()}")
     
     threading.Thread(target=monitor_serveo_output, daemon=True).start()
     
@@ -1135,7 +1086,7 @@ if __name__ == "__main__":
                         
                 if 'tunnel_process' in locals() and tunnel_process:
                     try:
-                        tunnel_process.terminate()
+                        tunnel_process.terminate() 
                         print("Terminated tunnel process")
                     except:
                         pass
