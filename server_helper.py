@@ -1124,7 +1124,29 @@ if __name__ == "__main__":
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
         finally:
-
-            ensure_server_inactive(server_id)
-            sys.exit(0)
+            try:
+                # Terminate all subprocesses
+                if 'server_process' in locals() and server_process:
+                    try:
+                        server_process.terminate()
+                        print("Terminated server process")
+                    except:
+                        pass
+                        
+                if 'tunnel_process' in locals() and tunnel_process:
+                    try:
+                        tunnel_process.terminate()
+                        print("Terminated tunnel process")
+                    except:
+                        pass
+                        
+                # Ensure server is marked as inactive in config
+                ensure_server_inactive(server_id)
+                print("Server shutdown complete. Exiting...")
+                
+                # Force exit the process completely
+                os._exit(0)  # Use os._exit instead of sys.exit
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
+                os._exit(1)
 
