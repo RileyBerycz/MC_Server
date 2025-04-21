@@ -364,14 +364,15 @@ def setup_serveo_tunnel(server_id):
                             json.dump(config, f, indent=2)
                         commit_and_push(config_path, f"Update with actual Serveo domain for {server_id}")
                     
+                    # Update Cloudflare DNS to point to this domain
+                    update_cloudflare_dns(server_id, assigned_domain)
+                    
                     print("\n" + "="*70)
                     print(f"✨ SERVEO TUNNEL ESTABLISHED! ✨")
                     print(f"Connect to Minecraft using: {assigned_domain}")
+                    if config.get('cloudflare_domain'):
+                        print(f"Or use permanent address: {config.get('cloudflare_domain')}")
                     print("="*70 + "\n")
-            
-            # Look for errors
-            if "Error" in line or "error" in line:
-                print(f"⚠️ Serveo tunnel error detected: {line.strip()}")
     
     threading.Thread(target=monitor_serveo_output, daemon=True).start()
     
@@ -815,6 +816,106 @@ def prune_backups(server_id, keep_count=10):
     except Exception as e:
         print(f"Error pruning backups: {e}")
 
+def update_cloudflare_dns(server_id, serveo_domain):
+    """Update Cloudflare DNS CNAME to point to the current Serveo domain"""
+    print(f"\n{'='*70}")
+    print("UPDATING CLOUDFLARE DNS RECORD")
+    print(f"{'='*70}")
+    
+    try:
+        import requests
+        
+        # Get the server configuration
+        config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Get Cloudflare API credentials from environment
+        cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+        cf_zone_id = os.environ.get("CLOUDFLARE_ZONE_ID")
+        cf_record_name = config.get('cf_record_name', f"minecraft-{server_id}")
+        
+        if not cf_api_token or not cf_zone_id:
+            print("⚠️ Cloudflare API credentials not found in environment variables")
+            return False
+            
+        # Find the DNS record ID
+        url = f"https://api.cloudflare.com/client/v4/zones/{cf_zone_id}/dns_records"
+        headers = {
+            "Authorization": f"Bearer {cf_api_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"⚠️ Failed to get DNS records: {response.status_code}")
+            return False
+            
+        dns_records = response.json().get('result', [])
+        record_id = None
+        
+        for record in dns_records:
+            if record['type'] == 'CNAME' and record['name'] == cf_record_name:
+                record_id = record['id']
+                break
+                
+        # Update the record if found, create if not
+        if record_id:
+            # Update existing record
+            update_url = f"{url}/{record_id}"
+            data = {
+                "type": "CNAME",
+                "name": cf_record_name,
+                "content": serveo_domain,
+                "ttl": 60,
+                "proxied": False
+            }
+            
+            response = requests.put(update_url, headers=headers, json=data)
+            
+            if response.status_code == 200:
+                print(f"✅ Updated DNS record {cf_record_name} to point to {serveo_domain}")
+                
+                # Save the Cloudflare domain to the config
+                config['cloudflare_domain'] = f"{cf_record_name}.yourdomain.com"
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                commit_and_push(config_path, f"Update Cloudflare domain for {server_id}")
+                
+                return True
+            else:
+                print(f"⚠️ Failed to update DNS record: {response.status_code}")
+                return False
+        else:
+            # Create new record
+            data = {
+                "type": "CNAME",
+                "name": cf_record_name,
+                "content": serveo_domain,
+                "ttl": 60,
+                "proxied": False
+            }
+            
+            response = requests.post(url, headers=headers, json=data)
+            
+            if response.status_code == 200:
+                print(f"✅ Created DNS record {cf_record_name} pointing to {serveo_domain}")
+                
+                # Save the Cloudflare domain to the config
+                config['cloudflare_domain'] = f"{cf_record_name}.yourdomain.com"
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                commit_and_push(config_path, f"Update Cloudflare domain for {server_id}")
+                
+                return True
+            else:
+                print(f"⚠️ Failed to create DNS record: {response.status_code}")
+                return False
+    except Exception as e:
+        print(f"⚠️ Error updating Cloudflare DNS: {e}")
+        return False
+
 if __name__ == "__main__":
     pull_latest()
     if len(sys.argv) < 3:
@@ -1023,6 +1124,7 @@ if __name__ == "__main__":
             if 'tunnel_process' in locals():
                 tunnel_process.terminate()
         finally:
+
             ensure_server_inactive(server_id)
-        sys.exit(0)
+            sys.exit(0)
 
