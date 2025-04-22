@@ -16,6 +16,6 @@
   "last_started": 1745321987,
   "shutdown_request": false,
   "last_stopped": 1745321845,
-  "pending_command": "",
+  "pending_command": "timeset day",
   "last_command_response": "Sent: weather clear"
 }
