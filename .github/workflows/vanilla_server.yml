@@ -40,7 +40,9 @@ jobs:
           fi
           
       - name: Run server
-        run: python server_helper.py ${{ inputs.server_id }} ${{ inputs.action }}
+        run: |
+          # Start the server and let it run for the configured duration
+          python3 -u server_helper.py ${{ inputs.server_id }} start
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

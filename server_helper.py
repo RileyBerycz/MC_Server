@@ -813,24 +813,32 @@ if __name__ == "__main__":
     process_start_time = time.time()
     print(f"[TIMING] Process started at {datetime.now().strftime('%H:%M:%S')}")
     
-    if len(sys.argv) < 3:
-        print("Usage: server_helper.py <server_id> <server_type> [initialize_only]")
+    if len(sys.argv) < 2:
+        print("Usage: server_helper.py <server_id> [action]")
         sys.exit(1)
-    subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
-    server_id = sys.argv[1]
-    server_type = sys.argv[2]
-    initialize_only = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
         
+    server_id = sys.argv[1]
+    action = sys.argv[2] if len(sys.argv) > 2 else "start"
+    
+    # Initialize Git configuration
+    subprocess.run(["git", "config", "user.name", "GitHub Actions"], check=True)
+    subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
+    
+    # Load the server config to get the server type
     config = load_server_config(server_id)
     if not config:
         print("Could not load server config.")
         sys.exit(1)
-        
-    if initialize_only:
+    
+    # Get server type from config
+    server_type = config.get('type', 'vanilla')
+    print(f"Using server type from config: {server_type}")
+    
+    if action.lower() == "initialize":
         success = start_server(server_id, server_type, initialize_only=True)
         ensure_server_inactive(server_id)
         sys.exit(0 if success else 1)
-    else:
+    elif action.lower() == "start":
         server_process = start_server(server_id, server_type)
         if not server_process:
             print("Failed to start server")
@@ -841,6 +849,7 @@ if __name__ == "__main__":
         server_ready_time = time.time()
         startup_duration = server_ready_time - process_start_time
         print(f"[TIMING] Server initialization completed in {startup_duration:.2f} seconds")
+        
         # After starting the server
         if server_process:
             # Ensure SSH client is available
