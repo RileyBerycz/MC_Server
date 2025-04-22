@@ -8,13 +8,13 @@
   "seed": "",
   "memory": "8G",
   "created_at": 1745071677.460764,
-  "is_active": true,
+  "is_active": false,
   "max_runtime": 45,
   "subdomain": "minecraft-test",
   "tunnel_url": "minecraft-test.rileyberycz.co.uk",
   "last_started": 1745345848,
-  "shutdown_request": true,
-  "last_stopped": 1745345637,
+  "shutdown_request": false,
+  "last_stopped": 1745346560,
   "pending_command": "",
   "last_command_response": "Sent: timeset day"
 }
