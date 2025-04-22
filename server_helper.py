@@ -4,10 +4,10 @@ import os
 import subprocess
 import time
 import json
-import re
 import sys
 import threading
-import socket
+import re
+import requests
 from github_helper import pull_latest, commit_and_push
 
 # Ensure unbuffered output
@@ -42,10 +42,10 @@ def start_server(server_id, server_type, initialize_only=False):
             f.write("text-filtering-config=\nspawn-monsters=true\nenforce-whitelist=false\nspawn-protection=16\n")
             f.write("resource-pack-sha1=\nmax-world-size=29999984\n")
 
-    # NEW: Ensure server has correct IP binding for tunneling
+    # Ensure server has correct IP binding
     ensure_correct_server_ip(server_dir)
 
-    # Check for existing world folder - fixed to look for the world directory
+    # Check for existing world folder
     if initialize_only:
         world_path = "world"
         if os.path.exists(world_path) and os.path.isdir(world_path):
@@ -150,10 +150,7 @@ def start_server(server_id, server_type, initialize_only=False):
     return process
 
 def ensure_correct_server_ip(server_dir):
-    """
-    Ensure server.properties has the correct IP binding for tunneling.
-    For Cloudflare Tunnel to work, the server must bind to 0.0.0.0 or be empty.
-    """
+    """Ensure server.properties has the correct IP binding."""
     properties_path = os.path.join(server_dir, "server.properties")
     if not os.path.exists(properties_path):
         print("server.properties not found, will be created with default settings")
@@ -172,266 +169,12 @@ def ensure_correct_server_ip(server_dir):
                 print(f"⚠️ Found restrictive server-ip={value} in server.properties")
                 lines[i] = "server-ip=0.0.0.0\n"
                 updated = True
-                print("✅ Updated server-ip to 0.0.0.0 for better tunnel compatibility")
+                print("✅ Updated server-ip to 0.0.0.0 for better server accessibility")
     
     # Write back if changed
     if updated:
         with open(properties_path, "w") as f:
             f.writelines(lines)
-
-def setup_cloudflared_tunnel(subdomain, tunnel_name):
-    tunnel_id, creds_path = write_tunnel_creds_file(subdomain)
-    print(f"Setting up Cloudflare named tunnel: {tunnel_name} (ID: {tunnel_id})", flush=True)
-    
-    # Create a config file with ingress rules - fixed to work with temporary URLs
-    config_dir = os.path.expanduser("~/.cloudflared")
-    os.makedirs(config_dir, exist_ok=True)
-    config_path = os.path.join(config_dir, f"config-{tunnel_id}.yaml")
-    
-    with open(config_path, "w") as f:
-        f.write(f"tunnel: {tunnel_id}\n")
-        f.write(f"credentials-file: {creds_path}\n")
-        f.write("ingress:\n")
-        # Named hostname route for the domain
-        f.write(f"  - hostname: {subdomain}.rileyberycz.co.uk\n")
-        f.write("    service: tcp://localhost:25565\n")
-        # Default catch-all - MUST BE LAST
-        f.write("  - service: http_status:404\n")
-    
-    print(f"Created config file with ingress rules at {config_path}", flush=True)
-    
-    # Create a separate temporary tunnel for direct testing
-    temp_config_path = os.path.join(config_dir, "temp-tunnel-config.yaml")
-    print(f"Setting up temporary tunnel for direct TCP testing...", flush=True)
-    
-    # Start tunnel with only the --url flag to generate a temporary URL
-    print(f"Running command: cloudflared tunnel --url tcp://localhost:25565", flush=True)
-    
-    temp_tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", "tcp://localhost:25565"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1,
-        env=os.environ.copy()
-    )
-    
-    # Start the main tunnel separately
-    print(f"Running command: cloudflared tunnel --config {config_path} run {tunnel_name}", flush=True)
-    tunnel_process = subprocess.Popen(
-        ["cloudflared", "tunnel", "--config", config_path, "run", tunnel_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1,
-        env=os.environ.copy()
-    )
-    
-    # Handle output from both tunnels
-    def print_temp_tunnel_output():
-        for line in iter(temp_tunnel_process.stdout.readline, ''):
-            print(f"TEMP-CLOUDFLARED: {line.strip()}", flush=True)
-            # Look for temporary URL in output
-            if "trycloudflare.com" in line:
-                print("\n" + "="*70)
-                print(f"✨ TEMPORARY CLOUDFLARE TCP URL DETECTED! ✨")
-                url_match = re.search(r'(https?://[^\s]+)', line)
-                if url_match:
-                    temp_url = url_match.group(1)
-                    print(f"Try connecting to Minecraft using: {temp_url.replace('https://', '')}")
-                    print("(Use just the domain part without https:// in Minecraft)")
-                else:
-                    print(f"Try connecting to: {line.strip()}")
-                print("="*70 + "\n")
-    
-    def print_tunnel_output():
-        for line in iter(tunnel_process.stdout.readline, ''):
-            print(f"CLOUDFLARED: {line.strip()}", flush=True)
-    
-    threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
-    threading.Thread(target=print_tunnel_output, daemon=True).start()
-    
-    print(f"Cloudflared processes started - main tunnel PID: {tunnel_process.pid}, temp tunnel PID: {temp_tunnel_process.pid}", flush=True)
-    return tunnel_process
-
-def setup_serveo_tunnel(server_id):
-    """Setup a Serveo SSH tunnel for the Minecraft server"""
-    print("\n" + "="*70)
-    print("SETTING UP SERVEO TUNNEL")
-    print("="*70)
-    
-    # Get the server configuration
-    config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
-    # Generate a completely random subdomain
-    import random
-    import string
-    random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    serveo_subdomain = f"mc-{random_id}"
-    
-    # Generate a random high port (between 10000 and 65000)
-    random_port = random.randint(10000, 65000)
-    
-    print(f"✅ Using random tunnel: {serveo_subdomain}:{random_port}")
-    
-    # Ensure SSH key is accepted automatically
-    print("Setting up SSH for Serveo...", flush=True)
-    home_dir = os.path.expanduser("~")
-    os.makedirs(f"{home_dir}/.ssh", exist_ok=True)
-    ssh_known_hosts = f"{home_dir}/.ssh/known_hosts"
-    if not os.path.exists(ssh_known_hosts):
-        open(ssh_known_hosts, 'a').close()
-    
-    subprocess.run(f"ssh-keyscan -H serveo.net >> {home_dir}/.ssh/known_hosts", shell=True)
-    
-    # Start the SSH tunnel WITH a specified random high port
-    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", 
-           f"{serveo_subdomain}:{random_port}:localhost:25565", "serveo.net"]
-    print(f"Starting Serveo tunnel with command: {' '.join(cmd)}", flush=True)
-    
-    # Start the tunnel process
-    tunnel_process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1,
-        env=os.environ.copy()
-    )
-    
-    # Monitor output to verify the connection
-    def monitor_serveo_output():
-        tunnel_verified = False
-        for line in iter(tunnel_process.stdout.readline, ''):
-            print(f"SERVEO: {line.strip()}", flush=True)
-            
-            # Look for successful connection
-            if "Forwarding" in line and "serveo.net" in line:
-                # Improved regex to better capture the full domain:port combination
-                tunnel_info = re.search(r'Forwarding.+?to ([a-zA-Z0-9.-]+\.serveo\.net)(:[0-9]+)?', line)
-                if tunnel_info:
-                    serveo_domain = tunnel_info.group(1)
-                    port_part = tunnel_info.group(2) or f":{random_port}"  # Use specified port if not in output
-                    assigned_endpoint = f"{serveo_domain}{port_part}"
-                    tunnel_verified = True
-                    
-                    # Update the config with the actual domain
-                    config['serveo_domain'] = assigned_endpoint
-                    with open(config_path, 'w') as f:
-                        json.dump(config, f, indent=2)
-                    commit_and_push(config_path, f"Update with actual Serveo domain for {server_id}")
-                    
-                    print("\n" + "="*70)
-                    print(f"✨ SERVEO TUNNEL ESTABLISHED! ✨")
-                    print(f"Connect to Minecraft using: {assigned_endpoint}")
-                    print("="*70 + "\n")
-            
-            # Look for errors
-            if "Error" in line or "error" in line or "denied" in line or "in use" in line:
-                print(f"⚠️ Serveo tunnel error detected: {line.strip()}")
-                
-                # If the error mentions port in use, try a different port
-                if "in use" in line and not tunnel_verified:
-                    print("Port in use, restarting with different port...")
-                    os._exit(2)  # Special exit code to trigger retry
-    
-    threading.Thread(target=monitor_serveo_output, daemon=True).start()
-    
-    # Wait for connection to establish
-    time.sleep(5)
-    
-    return tunnel_process
-
-def write_tunnel_creds_file(subdomain):
-    """Extract credentials for a specific tunnel and write to file."""
-    tunnel_map_path = os.path.join(BASE_DIR, "tunnel_id_map.json")
-    
-    # Handle missing tunnel_id_map.json file
-    if not os.path.exists(tunnel_map_path):
-        print(f"Warning: {tunnel_map_path} not found, downloading from Google Drive...")
-        
-        try:
-            import requests
-            
-            # Get file ID from Google Drive URL
-            file_id = "15RPnvXey81FA0XtBfWlBLA41K03-Ghg0"
-            
-            # Google Drive direct download URL format
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            
-            # Download the file
-            response = requests.get(download_url)
-            
-            if response.status_code == 200:
-                # Create directory if needed
-                os.makedirs(os.path.dirname(tunnel_map_path), exist_ok=True)
-                
-                # Save the file
-                with open(tunnel_map_path, "w") as f:
-                    f.write(response.text)
-                    
-                print(f"Successfully downloaded tunnel_id_map.json from Google Drive")
-            else:
-                print(f"Failed to download from Google Drive: {response.status_code}")
-                raise Exception("Could not download tunnel map file")
-                
-        except Exception as e:
-            print(f"Error downloading tunnel map: {e}")
-            raise Exception(f"Could not retrieve tunnel map: {e}")
-    
-    # Now load the file (either existing or downloaded)
-    with open(tunnel_map_path, "r") as f:
-        try:
-            tunnel_id_map = json.load(f)
-        except json.JSONDecodeError:
-            print("Error: Downloaded file is not valid JSON")
-            raise Exception("Invalid JSON in tunnel_id_map.json")
-    
-    # Get the FQDN for lookup
-    fqdn = f"{subdomain}.rileyberycz.co.uk"
-    
-    # Handle the new format with updated_domain
-    if fqdn in tunnel_id_map:
-        if isinstance(tunnel_id_map[fqdn], dict):
-            tunnel_id = tunnel_id_map[fqdn].get("tunnel_id")
-        else:
-            tunnel_id = tunnel_id_map[fqdn]
-    else:
-        print(f"No tunnel ID found for {fqdn} in tunnel_id_map.json")
-        raise Exception(f"No tunnel mapping for {fqdn}")
-    
-    # Rest of your existing code...
-    creds_env = os.environ.get("CLOUDFLARE_TUNNELS_CREDS")
-    if not creds_env:
-        raise Exception("CLOUDFLARE_TUNNELS_CREDS environment variable not set")
-
-    pattern = rf'{tunnel_id}[^{{]*{{[^}}]*AccountTag[^:]*:\s*([^,\n]+)[^}}]*TunnelSecret[^:]*:\s*([^,\n]+)[^}}]*TunnelID[^:]*:\s*([^,\n]+)[^}}]*Endpoint[^:]*:\s*([^}}]*)}}'
-    
-    match = re.search(pattern, creds_env, re.DOTALL)
-    if match:
-        account_tag = match.group(1).strip().strip('"')
-        tunnel_secret = match.group(2).strip().strip('"')
-        tunnel_id_value = match.group(3).strip().strip('"')
-        endpoint = match.group(4).strip().strip('"')
-        
-        tunnel_creds = {
-            "AccountTag": account_tag,
-            "TunnelSecret": tunnel_secret,
-            "TunnelID": tunnel_id_value,
-            "Endpoint": endpoint
-        }
-        
-        os.makedirs(os.path.expanduser("~/.cloudflared"), exist_ok=True)
-        creds_path = os.path.expanduser(f"~/.cloudflared/tunnel-{tunnel_id}.json")
-        with open(creds_path, "w") as f:
-            json.dump(tunnel_creds, f)
-        print(f"Successfully extracted credentials for tunnel {tunnel_id}")
-        return tunnel_id, creds_path
-    else:
-        print(f"Could not extract credentials for tunnel: {tunnel_id}")
-        raise Exception(f"Could not extract credentials for tunnel: {tunnel_id}")
 
 def write_status_file(server_id, running=True):
     config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
@@ -472,7 +215,6 @@ def set_server_inactive_on_exit(server_id):
         except Exception as e2:
             print(f"All attempts to mark server inactive failed: {e2}")
 
-# Add this function to ensure multiple status updates don't conflict
 def ensure_server_inactive(server_id):
     """Make absolutely sure the server is marked as inactive on shutdown"""
     try:
@@ -568,136 +310,6 @@ def process_pending_command(server_id, server_process):
     
     return True
 
-def validate_tunnel_map(subdomain=None):
-    print("Validating tunnel map against DNS records...")
-    mismatches = []
-    
-    try:
-        with open(os.path.join(BASE_DIR, "tunnel_id_map.json"), "r") as f:
-            tunnel_map = json.load(f)
-        
-        domains_to_check = {}
-        if subdomain:
-            fqdn = f"{subdomain}.rileyberycz.co.uk"
-            if fqdn in tunnel_map:
-                domains_to_check[fqdn] = tunnel_map[fqdn]
-            else:
-                print(f"Warning: {fqdn} not found in tunnel_id_map.json")
-                return []
-        else:
-            domains_to_check = tunnel_map
-        
-        for fqdn, tunnel_id in domains_to_check.items():
-            print(f"Checking {fqdn}...", end="", flush=True)
-                
-            dns_tunnel_id = lookup_dns_cname(fqdn)
-            
-            if dns_tunnel_id and dns_tunnel_id != tunnel_id:
-                mismatch = {
-                    "fqdn": fqdn,
-                    "map_tunnel_id": tunnel_id,
-                    "dns_tunnel_id": dns_tunnel_id
-                }
-                mismatches.append(mismatch)
-                print(f" ❌ MISMATCH: DNS points to {dns_tunnel_id} but map has {tunnel_id}")
-            elif dns_tunnel_id:
-                print(f" ✅ Correct: {tunnel_id}")
-            else:
-                print(f" ⚠️ Warning: DNS lookup failed")
-                
-    except Exception as e:
-        print(f"Error validating tunnel map: {e}")
-        
-    return mismatches
-
-def lookup_dns_cname(domain):
-    try:
-        result = subprocess.check_output(["dig", "CNAME", domain, "+short"], universal_newlines=True).strip()
-        if result and "cfargotunnel.com" in result:
-            return result.split(".")[0]
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-    
-    try:
-        result = subprocess.check_output(["nslookup", "-type=CNAME", domain], universal_newlines=True)
-        match = re.search(r'canonical name = ([0-9a-f-]+)\.cfargotunnel\.com', result)
-        if match:
-            return match.group(1)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-    
-    try:
-        result = subprocess.check_output(["host", "-t", "CNAME", domain], universal_newlines=True)
-        match = re.search(r'is an alias for ([0-9a-f-]+)\.cfargotunnel\.com', result)
-        if match:
-            return match.group(1)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-    
-    try:
-        result = subprocess.check_output(["nslookup", "-type=cname", domain], universal_newlines=True)
-        match = re.search(r'canonical name = ([0-9a-f-]+)\.cfargotunnel\.com', result)
-        if match:
-            return match.group(1)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-    
-    return None
-
-def is_dns_proxied(domain):
-    try:
-        cloudflare_ip_ranges = [
-            "173.245.48.", "103.21.244.", "103.22.200.", "103.31.4.",
-            "141.101.1.", "108.162.192.", "190.93.240.", "188.114.96.",
-            "197.234.240.", "198.41.128.", "162.158.", "104.16.", "104.17.",
-            "104.18.", "104.19.", "104.20.", "104.21.", "104.22.", "104.23.",
-            "104.24.", "104.25.", "104.26.", "104.27."
-        ]
-        
-        ip = socket.gethostbyname(domain)
-        
-        for ip_range in cloudflare_ip_ranges:
-            if ip.startswith(ip_range):
-                return True
-                
-        return False
-    except Exception:
-        return False
-
-def setup_temp_tcp_tunnel():
-    print("\nSetting up dedicated temporary TCP tunnel for Minecraft...")
-    
-    import uuid
-    temp_tunnel_name = f"temp-mc-{uuid.uuid4().hex[:8]}"
-    
-    temp_tunnel_cmd = [
-        "cloudflared", "tunnel", "--no-autoupdate",
-        "--origincert", os.path.expanduser("~/.cloudflared/cert.pem"),
-        "--no-tls-verify", 
-        "--url", "tcp://localhost:25565"
-    ]
-    
-    print(f"Starting temporary tunnel with command: {' '.join(temp_tunnel_cmd)}")
-    
-    temp_tunnel_process = subprocess.Popen(
-        temp_tunnel_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1,
-        env=os.environ.copy()
-    )
-    
-    def print_temp_tunnel_output():
-        for line in iter(temp_tunnel_process.stdout.readline, ''):
-            print(f"TEMP-TCP: {line.strip()}", flush=True)
-            
-            if "trycloudflare.com" in line:
-                    print("="*70 + "\n")
-    
-    threading.Thread(target=print_temp_tunnel_output, daemon=True).start()
-    return temp_tunnel_process
-
 def backup_server(server_id, backup_reason="scheduled"):
     print(f"\n=== Creating server backup for {server_id} ({backup_reason}) ===")
     server_dir = f"servers/{server_id}"
@@ -779,105 +391,181 @@ def prune_backups(server_id, keep_count=10):
     except Exception as e:
         print(f"Error pruning backups: {e}")
 
-def update_cloudflare_dns(server_id, serveo_domain):
-    """Update Cloudflare DNS CNAME to point to the current Serveo domain"""
-    print(f"\n{'='*70}")
-    print("UPDATING CLOUDFLARE DNS RECORD")
-    print(f"{'='*70}")
+def create_serveo_tunnel(server_id, minecraft_port=25565):
+    """Create a tunnel using serveo.net and update existing SRV record with the port"""
+    print("\n" + "="*70)
+    print("SETTING UP SERVEO TUNNEL")
+    print("="*70)
     
+    # Get subdomain for this server from server_domains.json
+    domain_name = get_server_domain(server_id)
+    print(f"Using domain name: {domain_name}")
+    
+    # Ensure SSH known_hosts is set up
+    home_dir = os.path.expanduser("~")
+    os.makedirs(f"{home_dir}/.ssh", exist_ok=True)
+    ssh_known_hosts = f"{home_dir}/.ssh/known_hosts"
+    if not os.path.exists(ssh_known_hosts):
+        open(ssh_known_hosts, 'a').close()
+    
+    subprocess.run(f"ssh-keyscan -H serveo.net >> {home_dir}/.ssh/known_hosts", shell=True)
+    
+    # Start the SSH tunnel to serveo.net with random port assignment
+    tunnel_process = subprocess.Popen(
+        ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"0:localhost:{minecraft_port}", "serveo.net"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True
+    )
+    
+    serveo_port = None
+    tunnel_url_event = threading.Event()
+    
+    def process_tunnel_output():
+        nonlocal serveo_port
+        for line in iter(tunnel_process.stdout.readline, ''):
+            print(f"TUNNEL: {line.strip()}", flush=True)
+            if "Forwarding" in line and "TCP" in line:
+                match = re.search(r'Forwarding TCP connections from ([^:]+):(\d+)', line)
+                if match:
+                    host, port = match.groups()
+                    serveo_port = port
+                    
+                    # Display connection info
+                    print("\n" + "="*70)
+                    print(f"✨ TUNNEL ESTABLISHED ✨")
+                    print(f"Serveo endpoint: {host}:{port}")
+                    print(f"Updating SRV record for {domain_name} with port {port}")
+                    print("="*70 + "\n")
+                    
+                    # Update ONLY the port on the existing SRV record
+                    update_srv_record_port(domain_name, port)
+                    
+                    # Signal that we have the port
+                    tunnel_url_event.set()
+    
+    tunnel_thread = threading.Thread(target=process_tunnel_output, daemon=True)
+    tunnel_thread.start()
+    
+    # Wait for the tunnel URL to be established (with timeout)
+    if not tunnel_url_event.wait(timeout=30):
+        print("⚠️ Tunnel setup is taking longer than expected...")
+    
+    return tunnel_process, serveo_port, domain_name
+
+def get_server_domain(server_id):
+    """Get the domain name to use for this server from server_domains.json"""
     try:
-        import requests
+        domains_path = os.path.join(BASE_DIR, "server_domains.json")
+        with open(domains_path, 'r') as f:
+            domains = json.load(f)
         
-        # Get the server configuration
+        # Get server number (assuming server_id format is like "3dc9675b")
+        # Also check if there's a config file with a subdomain already specified
         config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
-        with open(config_path, 'r') as f:
-            config = json.load(f)
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                if config.get('subdomain'):
+                    return config.get('subdomain')
         
+        # For each server in server_domains.json, check if updated_domain is not empty
+        for server_num, data in domains.items():
+            if data.get('updated_domain'):
+                # Check if this updated_domain matches our server's config
+                if data.get('updated_domain', '').lower() == config.get('subdomain', '').lower():
+                    return data.get('updated_domain')
+        
+        # If no match found, just return default domain from original 
+        # For demo/testing just return "minecraft-test"
+        return "minecraft-test"
+        
+    except Exception as e:
+        print(f"Error getting server domain: {e}")
+        return f"minecraft-{server_id}"
+
+def update_srv_record_port(domain_name, port):
+    """Update ONLY the port field of an existing SRV record"""
+    try:
         # Get Cloudflare API credentials from environment
         cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
         cf_zone_id = os.environ.get("CLOUDFLARE_ZONE_ID")
-        cf_record_name = config.get('cf_record_name', f"minecraft-{server_id}")
         
         if not cf_api_token or not cf_zone_id:
             print("⚠️ Cloudflare API credentials not found in environment variables")
+            print(f"Manual SRV update required: Set port {port} for _minecraft._tcp.{domain_name}")
             return False
-            
-        # Find the DNS record ID
+        
+        # Record name in Cloudflare format
+        record_name = f"_minecraft._tcp.{domain_name}"
+        
+        # Find the existing SRV record
         url = f"https://api.cloudflare.com/client/v4/zones/{cf_zone_id}/dns_records"
         headers = {
             "Authorization": f"Bearer {cf_api_token}",
             "Content-Type": "application/json"
         }
         
-        response = requests.get(url, headers=headers)
+        response = requests.get(
+            url,
+            headers=headers,
+            params={"name": record_name}
+        )
         
         if response.status_code != 200:
-            print(f"⚠️ Failed to get DNS records: {response.status_code}")
+            print(f"⚠️ Failed to query DNS records: {response.status_code}")
+            return False
+        
+        records = response.json().get('result', [])
+        if not records:
+            print(f"⚠️ No SRV record found for {record_name}")
             return False
             
-        dns_records = response.json().get('result', [])
-        record_id = None
-        
-        for record in dns_records:
-            if record['type'] == 'CNAME' and record['name'] == cf_record_name:
+        # Update each matching SRV record with the new port
+        for record in records:
+            if record['type'] == 'SRV' and record['name'] == record_name:
                 record_id = record['id']
-                break
                 
-        # Update the record if found, create if not
-        if record_id:
-            # Update existing record
-            update_url = f"{url}/{record_id}"
-            data = {
-                "type": "CNAME",
-                "name": cf_record_name,
-                "content": serveo_domain,
-                "ttl": 60,
-                "proxied": False
-            }
-            
-            response = requests.put(update_url, headers=headers, json=data)
-            
-            if response.status_code == 200:
-                print(f"✅ Updated DNS record {cf_record_name} to point to {serveo_domain}")
+                # Get the current data and update only the port
+                current_data = record['data']
+                current_data['port'] = int(port)
                 
-                # Save the Cloudflare domain to the config
-                config['cloudflare_domain'] = f"{cf_record_name}.yourdomain.com"
-                with open(config_path, 'w') as f:
-                    json.dump(config, f, indent=2)
-                commit_and_push(config_path, f"Update Cloudflare domain for {server_id}")
+                # Update the record with new port
+                update_url = f"{url}/{record_id}"
+                update_data = {
+                    "type": "SRV",
+                    "name": record_name,
+                    "data": current_data,
+                    "ttl": 60
+                }
                 
-                return True
-            else:
-                print(f"⚠️ Failed to update DNS record: {response.status_code}")
-                return False
-        else:
-            # Create new record
-            data = {
-                "type": "CNAME",
-                "name": cf_record_name,
-                "content": serveo_domain,
-                "ttl": 60,
-                "proxied": False
-            }
-            
-            response = requests.post(url, headers=headers, json=data)
-            
-            if response.status_code == 200:
-                print(f"✅ Created DNS record {cf_record_name} pointing to {serveo_domain}")
+                response = requests.put(update_url, headers=headers, json=update_data)
                 
-                # Save the Cloudflare domain to the config
-                config['cloudflare_domain'] = f"{cf_record_name}.yourdomain.com"
-                with open(config_path, 'w') as f:
-                    json.dump(config, f, indent=2)
-                commit_and_push(config_path, f"Update Cloudflare domain for {server_id}")
-                
-                return True
-            else:
-                print(f"⚠️ Failed to create DNS record: {response.status_code}")
-                return False
-    except Exception as e:
-        print(f"⚠️ Error updating Cloudflare DNS: {e}")
+                if response.status_code == 200:
+                    print(f"✅ Updated SRV record port for {domain_name} to {port}")
+                    return True
+                else:
+                    print(f"⚠️ Failed to update SRV record: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    return False
+        
+        print(f"⚠️ No matching SRV record found for {record_name}")
         return False
+                
+    except Exception as e:
+        print(f"⚠️ Error updating SRV record port: {e}")
+        return False
+
+def ensure_ssh_client():
+    """Ensure SSH client is installed on Linux systems."""
+    try:
+        result = subprocess.run(["ssh", "-V"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            print("⚠️ SSH client not found. Installing SSH client...")
+            subprocess.run(["sudo", "apt-get", "install", "-y", "openssh-client"], check=True)
+            print("✅ SSH client installed successfully.")
+    except Exception as e:
+        print(f"⚠️ Failed to ensure SSH client: {e}")
 
 if __name__ == "__main__":
     pull_latest()
@@ -894,8 +582,6 @@ if __name__ == "__main__":
         print("Could not load server config.")
         sys.exit(1)
 
-    address = config.get('address')
-
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
         ensure_server_inactive(server_id)
@@ -907,67 +593,22 @@ if __name__ == "__main__":
             ensure_server_inactive(server_id)
             sys.exit(1)
 
-        tunnel_name = config.get('subdomain')
-
-        max_retries = 3
-        retry_count = 0
-
-        while retry_count < max_retries:
-            try:
-                tunnel_process = setup_serveo_tunnel(server_id)
-                # If we get here, the tunnel started successfully
-                break
-            except SystemExit as e:
-                if e.code == 2:  # Our special code for port in use
-                    retry_count += 1
-                    print(f"Retrying tunnel setup ({retry_count}/{max_retries})...")
-                    time.sleep(2)  # Brief pause before retry
-                else:
-                    raise  # Re-raise for other exit codes
-
-        if retry_count == max_retries:
-            print("Failed to establish tunnel after multiple attempts")
-            ensure_server_inactive(server_id)
-            sys.exit(1)
-
-        # Add server binding verification
-        print("\n" + "="*70)
-        print("VERIFYING SERVER BINDING...")
-        try:
-            # Check server binding using subprocess
-            netstat_output = subprocess.check_output("netstat -tulpn | grep java", shell=True).decode('utf-8')
-            print(f"Server binding information:\n{netstat_output}")
-
-            # Test connection to localhost
-            nc_process = subprocess.run(["nc", "-z", "-v", "localhost", "25565"],
-                                         stderr=subprocess.PIPE,
-                                         text=True)
-            if nc_process.returncode == 0:
-                print("✅ Server is accessible from localhost!")
-            else:
-                print(f"⚠️ Connection test failed: {nc_process.stderr}")
-
-            # Also test direct HTTP request to server to check if it responds
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            result = sock.connect_ex(('localhost', 25565))
-            if result == 0:
-                print("✅ Socket connection to Minecraft server succeeded")
-                # Try to get server status response
-                sock.send(b'\xfe\x01')
-                response = sock.recv(1024)
-                print(f"Server response: {response}")
-            else:
-                print(f"⚠️ Socket connection failed with error code {result}")
-            sock.close()
-        except Exception as e:
-            print(f"Error during verification: {e}")
-
-        print("="*70)
-        print(f"✨ MINECRAFT SERVER READY! ✨")
-        print(f"📌 CONNECT USING: {config.get('serveo_domain')}")
-        print(f"🎮 Minecraft version: 1.20.4")
-        print("="*70 + "\n")
+        # After starting the server
+        if server_process:
+            # Ensure SSH client is available
+            import platform
+            if platform.system() == "Linux":
+                ensure_ssh_client()
+            
+            # Create the tunnel and update the SRV record
+            tunnel_process, serveo_port, domain_name = create_serveo_tunnel(server_id)
+            
+            if serveo_port:
+                print("\n" + "="*70)
+                print(f"✨ MINECRAFT SERVER READY! ✨")
+                print(f"📌 CONNECT USING: {domain_name}.yourdomain.co.uk")
+                print(f"🎮 Minecraft version: 1.20.4")
+                print("="*70 + "\n")
 
         write_status_file(server_id, running=True)
 
@@ -1031,18 +672,12 @@ if __name__ == "__main__":
                         print(f"Error stopping server for restart: {e}")
                         server_process.terminate()
                     
-                    if 'tunnel_process' in locals():
-                        tunnel_process.terminate()
-                        
-                    print("\n=== Restarting server and tunnels ===")
+                    print("\n=== Restarting server ===")
                     server_process = start_server(server_id, server_type)
                     if not server_process:
                         print("Failed to restart server")
                         ensure_server_inactive(server_id)
                         sys.exit(1)
-                        
-                    tunnel_name = config.get('subdomain')
-                    tunnel_process = setup_serveo_tunnel(server_id)
                     
                     start_time = time.time()
                     last_backup_time = start_time
@@ -1085,12 +720,16 @@ if __name__ == "__main__":
                                 if server_process.poll() is not None:
                                     print("Server stopped gracefully!")
                                     ensure_server_inactive(server_id)
+                                    # Force exit after shutdown
+                                    os._exit(0)
                                     break
                                 time.sleep(1)
                         except Exception as e:
                             print(f"Error stopping server: {e}")
                             server_process.terminate()
                             ensure_server_inactive(server_id)
+                            # Force exit after error
+                            os._exit(1)
                             break
                 else:
                     print("Config file missing during shutdown check. Stopping server.")
@@ -1100,12 +739,12 @@ if __name__ == "__main__":
                     except Exception:
                         server_process.terminate()
                     ensure_server_inactive(server_id)
+                    # Force exit if config missing
+                    os._exit(1)
                     break
         except KeyboardInterrupt:
-            print("Stopping server and tunnel", flush=True)
+            print("Stopping server", flush=True)
             server_process.terminate()
-            if 'tunnel_process' in locals():
-                tunnel_process.terminate()
         finally:
             try:
                 # Terminate all subprocesses
@@ -1113,13 +752,6 @@ if __name__ == "__main__":
                     try:
                         server_process.terminate()
                         print("Terminated server process")
-                    except:
-                        pass
-                        
-                if 'tunnel_process' in locals() and tunnel_process:
-                    try:
-                        tunnel_process.terminate() 
-                        print("Terminated tunnel process")
                     except:
                         pass
                         
@@ -1132,4 +764,3 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error during shutdown: {e}")
                 os._exit(1)
-
