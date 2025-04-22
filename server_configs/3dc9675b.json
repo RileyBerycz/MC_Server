@@ -16,6 +16,6 @@
   "last_started": 1745321987,
   "shutdown_request": false,
   "last_stopped": 1745321845,
-  "pending_command": "weather clear",
-  "last_command_response": "Sent: save-all"
+  "pending_command": "",
+  "last_command_response": "Sent: weather clear"
 }
