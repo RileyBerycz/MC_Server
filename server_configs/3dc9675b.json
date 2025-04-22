@@ -16,6 +16,6 @@
   "last_started": 1745321987,
   "shutdown_request": false,
   "last_stopped": 1745321845,
-  "pending_command": "",
+  "pending_command": "save",
   "last_command_response": "Sent: whitelist add __Rejection__"
 }
