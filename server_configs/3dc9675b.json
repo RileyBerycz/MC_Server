@@ -14,7 +14,7 @@
   "subdomain": "minecraft-test",
   "tunnel_url": "minecraft-test.rileyberycz.co.uk",
   "last_started": 1745321987,
-  "shutdown_request": false,
+  "shutdown_request": true,
   "last_stopped": 1745321845,
   "pending_command": "",
   "last_command_response": "Sent: timeset day"
