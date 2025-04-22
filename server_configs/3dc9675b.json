@@ -15,6 +15,6 @@
   "last_started": 1745346630,
   "shutdown_request": false,
   "last_stopped": 1745346560,
-  "pending_command": "",
+  "pending_command": "timeset day",
   "last_command_response": "Sent: timeset day"
 }
