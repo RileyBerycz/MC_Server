@@ -8,6 +8,7 @@ import sys
 import threading
 import re
 import requests
+from datetime import datetime, timedelta
 from github_helper import pull_latest, commit_and_push
 
 # Ensure unbuffered output
@@ -106,12 +107,19 @@ def start_server(server_id, server_type, initialize_only=False):
     print(f"Server process started with PID: {process.pid}")
 
     initialized = False
+    server_output_hook = None
 
     def read_output():
-        nonlocal initialized
+        nonlocal initialized, server_output_hook
         try:
             for line in iter(process.stdout.readline, ''):
-                print(f"SERVER OUTPUT: {line.strip()}", flush=True)
+                line_text = line.strip()
+                print(f"SERVER OUTPUT: {line_text}", flush=True)
+                
+                # If we have a hook function for capturing output, call it
+                if server_output_hook:
+                    server_output_hook(line_text)
+                    
                 if "Done" in line and "For help, type" in line:
                     print("Server initialization completed!", flush=True)
                     initialized = True
@@ -292,9 +300,41 @@ def process_pending_command(server_id, server_process):
             
             try:
                 print(f"Sending command to server: {command_to_send.strip()}")
+                
+                # Create a flag and queue to track responses
+                command_sent_time = time.time()
+                expected_response = None
+                
+                # Temporary response collection
+                response_queue = []
+                
+                # Create a response monitoring function
+                def capture_command_response(line):
+                    # Add response lines that appear after command is sent
+                    if time.time() - command_sent_time <= 5:  # 5 second window to capture responses
+                        response_queue.append(line)
+                
+                # Add the response collector to the server output reader
+                server_output_hook = capture_command_response
+                
+                # Send the command
                 server_process.stdin.write(command_to_send)
                 server_process.stdin.flush()
-                config['last_command_response'] = f"Sent: {pending_command}"
+                
+                # Wait a bit for responses to be collected
+                time.sleep(2)
+                
+                # Use the most relevant response line (could enhance this logic)
+                relevant_response = "No visible response"
+                if response_queue:
+                    # Find the most likely response (not just a command echo)
+                    for line in response_queue:
+                        if "INFO]: " in line and not line.endswith(pending_command):
+                            relevant_response = line.split("INFO]: ", 1)[1] if "INFO]: " in line else line
+                            break
+                
+                # Store both the command and response
+                config['last_command_response'] = f"Sent: {pending_command}\nSERVER RESPONDED: {relevant_response}"
                 config['pending_command'] = ""
                 
                 with open(config_path, 'w') as f:
@@ -496,8 +536,9 @@ def update_srv_record_port(domain_name, port):
             print(f"Manual SRV update required: Set port {port} for _minecraft._tcp.{domain_name}")
             return False
         
-        # Record name in Cloudflare format
+        # Record name in Cloudflare format - match exact format in Cloudflare
         record_name = f"_minecraft._tcp.{domain_name}"
+        print(f"Looking for SRV record with name: {record_name}")
         
         # Find the existing SRV record
         url = f"https://api.cloudflare.com/client/v4/zones/{cf_zone_id}/dns_records"
@@ -506,50 +547,63 @@ def update_srv_record_port(domain_name, port):
             "Content-Type": "application/json"
         }
         
-        response = requests.get(
+        # First, list all DNS records to debug
+        list_response = requests.get(
             url,
-            headers=headers,
-            params={"name": record_name}
+            headers=headers
         )
         
-        if response.status_code != 200:
-            print(f"⚠️ Failed to query DNS records: {response.status_code}")
-            return False
-        
-        records = response.json().get('result', [])
-        if not records:
-            print(f"⚠️ No SRV record found for {record_name}")
+        if list_response.status_code != 200:
+            print(f"⚠️ Failed to list DNS records: {list_response.status_code}")
             return False
             
-        # Update each matching SRV record with the new port
-        for record in records:
-            if record['type'] == 'SRV' and record['name'] == record_name:
-                record_id = record['id']
-                
-                # Get the current data and update only the port
-                current_data = record['data']
-                current_data['port'] = int(port)
-                
-                # Update the record with new port
-                update_url = f"{url}/{record_id}"
-                update_data = {
-                    "type": "SRV",
-                    "name": record_name,
-                    "data": current_data,
-                    "ttl": 60
-                }
-                
-                response = requests.put(update_url, headers=headers, json=update_data)
-                
-                if response.status_code == 200:
-                    print(f"✅ Updated SRV record port for {domain_name} to {port}")
-                    return True
-                else:
-                    print(f"⚠️ Failed to update SRV record: {response.status_code}")
-                    print(f"Response: {response.text}")
-                    return False
+        all_records = list_response.json().get('result', [])
+        print(f"Found {len(all_records)} total DNS records")
         
-        print(f"⚠️ No matching SRV record found for {record_name}")
+        # Log all SRV records to help debug
+        srv_records = [r for r in all_records if r['type'] == 'SRV']
+        print(f"Found {len(srv_records)} SRV records:")
+        for record in srv_records:
+            print(f"  - {record['name']} (ID: {record['id']})")
+        
+        # Now try to find the exact record we need
+        matching_records = []
+        for record in srv_records:
+            # Case-insensitive comparison without trailing dots
+            if record['name'].lower().rstrip('.') == record_name.lower().rstrip('.'):
+                matching_records.append(record)
+                
+        if not matching_records:
+            print(f"⚠️ No matching SRV record found for {record_name}")
+            return False
+        
+        # Update each matching SRV record with the new port
+        for record in matching_records:
+            record_id = record['id']
+            
+            # Get the current data and update only the port
+            current_data = record['data']
+            current_data['port'] = int(port)
+            
+            # Preserve the rest of the record data
+            update_url = f"{url}/{record_id}"
+            update_data = {
+                "type": "SRV",
+                "name": record['name'],  # Use the exact name from the record
+                "data": current_data,
+                "ttl": record.get('ttl', 60)
+            }
+            
+            response = requests.put(update_url, headers=headers, json=update_data)
+            
+            if response.status_code == 200:
+                print(f"✅ Updated SRV record port for {record['name']} to {port}")
+                return True
+            else:
+                print(f"⚠️ Failed to update SRV record: {response.status_code}")
+                print(f"Response: {response.text}")
+                return False
+        
         return False
                 
     except Exception as e:
@@ -567,21 +621,211 @@ def ensure_ssh_client():
     except Exception as e:
         print(f"⚠️ Failed to ensure SSH client: {e}")
 
+def send_shutdown_warnings(server_process, minutes_remaining):
+    """Send countdown warnings to players"""
+    try:
+        if minutes_remaining == 30:
+            cmd = f'/title @a title {{"text":"Server Restarting","color":"gold"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/title @a subtitle {{"text":"in 30 minutes","color":"yellow"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/say Server will restart in 30 minutes'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+        elif minutes_remaining == 15:
+            cmd = f'/title @a title {{"text":"Server Restarting","color":"gold"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/title @a subtitle {{"text":"in 15 minutes","color":"yellow"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/say Server will restart in 15 minutes'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+        elif minutes_remaining == 5:
+            cmd = f'/title @a title {{"text":"Server Restarting","color":"gold"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/title @a subtitle {{"text":"in 5 minutes","color":"yellow"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/say Server will restart in 5 minutes'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+        elif minutes_remaining == 1:
+            cmd = f'/title @a title {{"text":"Server Restarting","color":"red"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/title @a subtitle {{"text":"in 1 minute!","color":"red"}}'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+            cmd = f'/say Server will restart in 1 minute!'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+        elif minutes_remaining == 0:
+            # Final countdown from 10 to 0
+            for i in range(10, -1, -1):
+                cmd = f'/title @a title {{"text":"Restarting in","color":"red"}}'
+                server_process.stdin.write(f'{cmd}\n')
+                server_process.stdin.flush()
+                
+                cmd = f'/title @a subtitle {{"text":"{i} seconds!","color":"red"}}'
+                server_process.stdin.write(f'{cmd}\n')
+                server_process.stdin.flush()
+                
+                if i > 0:
+                    time.sleep(1)
+            
+            cmd = f'/say Server is now restarting. You will be disconnected.'
+            server_process.stdin.write(f'{cmd}\n')
+            server_process.stdin.flush()
+            
+    except Exception as e:
+        print(f"Error sending shutdown warnings: {e}")
+
+def shutdown_server(server_process, tunnel_process, server_id, reason="unknown"):
+    """Handle complete server shutdown with timing and git operations"""
+    shutdown_start_time = time.time()
+    print(f"[TIMING] Starting server shutdown at {datetime.now().strftime('%H:%M:%S')} (reason: {reason})")
+    
+    # Create backup
+    print("Creating final backup before shutdown...")
+    backup_server(server_id, backup_reason=f"shutdown_{reason}")
+    
+    # Shutdown the server
+    try:
+        server_process.stdin.write('stop\n')
+        server_process.stdin.flush()
+        print("Sent 'stop' command to server")
+        
+        # Wait for server to exit
+        server_exit_time = None
+        for _ in range(60):  # Wait up to 60 seconds
+            if server_process.poll() is not None:
+                server_exit_time = time.time()
+                print(f"[TIMING] Server stopped after {server_exit_time - shutdown_start_time:.2f} seconds")
+                break
+            time.sleep(1)
+            
+        if not server_exit_time:
+            print("Server did not stop gracefully, terminating...")
+            server_process.terminate()
+            server_exit_time = time.time()
+            
+        # Terminate tunnel
+        if tunnel_process and tunnel_process.poll() is None:
+            print("Terminating tunnel process...")
+            tunnel_process.terminate()
+            
+        # Commit changes to git
+        commit_start_time = time.time()
+        success = commit_server_files(server_id)
+        commit_end_time = time.time()
+        
+        print(f"[TIMING] Git operations completed in {commit_end_time - commit_start_time:.2f} seconds")
+        print(f"[TIMING] Total shutdown process took {commit_end_time - shutdown_start_time:.2f} seconds")
+        
+        # If this was a max_runtime shutdown (not user requested), trigger restart
+        if reason == "max_runtime" and success:
+            config = load_server_config(server_id)
+            if config and not config.get('shutdown_request', False):
+                print("Triggering server restart via GitHub Actions...")
+                trigger_server_restart(server_id)
+                
+        return True
+    except Exception as e:
+        print(f"Error during shutdown: {e}")
+        return False
+
+def commit_server_files(server_id):
+    """Commit server files to Git repository"""
+    try:
+        print(f"Committing server files for {server_id}...")
+        pull_latest()  # Already uses github_helper.py
+        
+        # Add server files
+        server_dir = f"servers/{server_id}"
+        
+        # Use the existing commit_and_push function from github_helper.py
+        commit_and_push(server_dir, f"Update server data for {server_id}")
+        
+        print("Successfully pushed data to GitHub")
+        return True
+    except Exception as e:
+        print(f"Error during Git operations: {e}")
+        return False
+
+def trigger_server_restart(server_id):
+    """Trigger a new GitHub Actions workflow run to restart the server"""
+    try:
+        github_token = os.environ.get("GITHUB_TOKEN")
+        github_repository = os.environ.get("GITHUB_REPOSITORY")
+        
+        if not github_token or not github_repository:
+            print("GitHub token or repository not found in environment")
+            return False
+            
+        url = f"https://api.github.com/repos/{github_repository}/actions/workflows/minecraft_server.yml/dispatches"
+        
+        # Prepare request
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        data = {
+            "ref": "main",
+            "inputs": {
+                "server_id": server_id,
+                "action": "start"
+            }
+        }
+        
+        # Make the request
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 204:
+            print(f"Successfully triggered server restart workflow for {server_id}")
+            return True
+        else:
+            print(f"Failed to trigger workflow: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"Error triggering server restart: {e}")
+        return False
+
 if __name__ == "__main__":
-    pull_latest()
+    process_start_time = time.time()
+    print(f"[TIMING] Process started at {datetime.now().strftime('%H:%M:%S')}")
+    
     if len(sys.argv) < 3:
         print("Usage: server_helper.py <server_id> <server_type> [initialize_only]")
         sys.exit(1)
-
+    subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
     server_id = sys.argv[1]
     server_type = sys.argv[2]
     initialize_only = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
-
+        
     config = load_server_config(server_id)
     if not config:
         print("Could not load server config.")
         sys.exit(1)
-
+        
     if initialize_only:
         success = start_server(server_id, server_type, initialize_only=True)
         ensure_server_inactive(server_id)
@@ -592,155 +836,78 @@ if __name__ == "__main__":
             print("Failed to start server")
             ensure_server_inactive(server_id)
             sys.exit(1)
-
+            
+        # Calculate timing
+        server_ready_time = time.time()
+        startup_duration = server_ready_time - process_start_time
+        print(f"[TIMING] Server initialization completed in {startup_duration:.2f} seconds")
         # After starting the server
         if server_process:
             # Ensure SSH client is available
             import platform
             if platform.system() == "Linux":
                 ensure_ssh_client()
-            
             # Create the tunnel and update the SRV record
             tunnel_process, serveo_port, domain_name = create_serveo_tunnel(server_id)
-            
+            tunnel_ready_time = time.time()
+            tunnel_duration = tunnel_ready_time - server_ready_time
+            print(f"[TIMING] Tunnel established in {tunnel_duration:.2f} seconds")
+            print(f"[TIMING] Total time to fully ready: {tunnel_ready_time - process_start_time:.2f} seconds")
             if serveo_port:
                 print("\n" + "="*70)
                 print(f"✨ MINECRAFT SERVER READY! ✨")
                 print(f"📌 CONNECT USING: {domain_name}.yourdomain.co.uk")
                 print(f"🎮 Minecraft version: 1.20.4")
                 print("="*70 + "\n")
-
         write_status_file(server_id, running=True)
-
         import atexit
         atexit.register(set_server_inactive_on_exit, server_id)
-
         try:
             print("Server is running. Press Ctrl+C to stop.", flush=True)
             start_time = time.time()
-            last_backup_time = start_time
-            
-            # Check if running in GitHub Actions
-            is_github_actions = os.environ.get('GITHUB_ACTIONS') == 'true'
-            if is_github_actions:
-                print(f"⚠️ Running in GitHub Actions environment - will respect max_runtime={config.get('max_runtime', 45)} hours")
-                # For GitHub Actions, don't restart on max_runtime, just exit
-                config['restart_on_max_runtime'] = False
             
             while True:
                 time.sleep(5)
                 current_time = time.time()
                 
-                pull_latest()
-                
-                runtime_hours = (current_time - start_time) / 3600
-                if config.get('max_runtime') and runtime_hours >= config.get('max_runtime'):
-                    print(f"\n=== Maximum runtime of {config.get('max_runtime')} hours reached ===")
-                    print("Creating backup and restarting server...")
-                    
-                    backup_server(server_id, backup_reason="max_runtime")
-                    
-                    try:
-                        server_process.stdin.write('say Server will restart in 60 seconds due to scheduled maintenance\n')
-                        server_process.stdin.flush()
-                        time.sleep(30)
-                        server_process.stdin.write('say Server will restart in 30 seconds\n')
-                        server_process.stdin.flush()
-                        time.sleep(20)
-                        server_process.stdin.write('say Server will restart in 10 seconds\n')
-                        server_process.stdin.flush()
-                        time.sleep(10)
-                    except Exception as e:
-                        print(f"Error sending restart warnings: {e}")
-                    
-                    try:
-                        server_process.stdin.write('stop\n')
-                        server_process.stdin.flush()
-                        
-                        print("Waiting for server to stop gracefully...")
-                        for _ in range(30):
-                            if server_process.poll() is not None:
-                                print("Server stopped gracefully!")
-                                ensure_server_inactive(server_id)
-                                break
-                            time.sleep(1)
-                        
-                        if server_process.poll() is None:
-                            print("Server didn't stop gracefully, terminating...")
-                            server_process.terminate()
-                    except Exception as e:
-                        print(f"Error stopping server for restart: {e}")
-                        server_process.terminate()
-                    
-                    print("\n=== Restarting server ===")
-                    server_process = start_server(server_id, server_type)
-                    if not server_process:
-                        print("Failed to restart server")
-                        ensure_server_inactive(server_id)
-                        sys.exit(1)
-                    
-                    start_time = time.time()
-                    last_backup_time = start_time
-                    print("Server successfully restarted!")
-                    continue
-                
-                backup_interval_hours = config.get('backup_interval', 0)
-                if backup_interval_hours > 0:
-                    hours_since_backup = (current_time - last_backup_time) / 3600
-                    if hours_since_backup >= backup_interval_hours:
-                        print(f"\n=== Periodic backup interval of {backup_interval_hours} hours reached ===")
-                        
-                        if backup_server(server_id, backup_reason="scheduled"):
-                            last_backup_time = current_time
-                            print("Periodic backup completed successfully")
-                
-                prune_backups(server_id, keep_count=config.get('backup_keep_count', 10))
-                
+                # Check for pending commands
                 if not process_pending_command(server_id, server_process):
-                    print("Config missing or command processing failed, server stopped.")
+                    print("Error processing pending command, will retry")
+                
+                # Check for shutdown request
+                config = load_server_config(server_id)
+                if not config:
+                    print("Server config not found, stopping server")
                     break
-                    
-                config_path = os.path.join(BASE_DIR, 'server_configs', f'{server_id}.json')
-                if os.path.exists(config_path):
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                    
-                    if config.get('shutdown_request'):
-                        print("Shutdown requested via config. Stopping server...", flush=True)
-                        
-                        backup_server(server_id, backup_reason="shutdown")
-                        
-                        try:
-                            print("Sending stop command to server")
-                            server_process.stdin.write('stop\n')
-                            server_process.stdin.flush()
-                            
-                            print("Waiting for server to stop gracefully...")
-                            for _ in range(30):
-                                if server_process.poll() is not None:
-                                    print("Server stopped gracefully!")
-                                    ensure_server_inactive(server_id)
-                                    # Force exit after shutdown
-                                    os._exit(0)
-                                    break
-                                time.sleep(1)
-                        except Exception as e:
-                            print(f"Error stopping server: {e}")
-                            server_process.terminate()
-                            ensure_server_inactive(server_id)
-                            # Force exit after error
-                            os._exit(1)
-                            break
-                else:
-                    print("Config file missing during shutdown check. Stopping server.")
-                    try:
-                        server_process.stdin.write('stop\n')
-                        server_process.stdin.flush()
-                    except Exception:
-                        server_process.terminate()
-                    ensure_server_inactive(server_id)
-                    # Force exit if config missing
-                    os._exit(1)
+                if config.get('shutdown_request'):
+                    print("Shutdown requested via config. Stopping server...")
+                    shutdown_server(server_process, tunnel_process, server_id, reason="user_request")
+                    break
+                
+                # Check for max runtime
+                runtime_minutes = (current_time - start_time) / 60
+                max_runtime = config.get('max_runtime', 45)
+                # Determine remaining time
+                minutes_remaining = max_runtime - runtime_minutes
+                
+                # Send warnings at specific intervals
+                if minutes_remaining <= 30 and minutes_remaining > 29:
+                    send_shutdown_warnings(server_process, 30)
+                elif minutes_remaining <= 15 and minutes_remaining > 14:
+                    send_shutdown_warnings(server_process, 15)
+                elif minutes_remaining <= 5 and minutes_remaining > 4:
+                    send_shutdown_warnings(server_process, 5)
+                elif minutes_remaining <= 1 and minutes_remaining > 0:
+                    send_shutdown_warnings(server_process, 1)
+                
+                # Time to shutdown
+                if runtime_minutes >= max_runtime:
+                    print(f"\n=== Maximum runtime of {max_runtime} minutes reached ===")
+                    # Final countdown
+                    send_shutdown_warnings(server_process, 0)
+                    # Shutdown with auto-restart
+                    shutdown_server(server_process, tunnel_process, server_id, reason="max_runtime")
+                    print("Server has been shut down and data committed. Restart has been triggered.")
                     break
         except KeyboardInterrupt:
             print("Stopping server", flush=True)

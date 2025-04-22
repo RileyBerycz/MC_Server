@@ -11,7 +11,7 @@ import traceback
 import datetime
 import requests
 import threading
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 from github_helper import pull_latest, commit_and_push
 
@@ -324,6 +324,177 @@ def revert_tunnel_domain(current_domain):
         print(f"Error: Domain {fqdn} not found in tunnel map")
         return False
 
+def revert_server_domain(server_id, subdomain):
+    """
+    Reverts a server domain during deletion:
+    1. Finds the corresponding original domain in server_domains.json
+    2. Reverts the SRV record to use the original domain
+    3. Clears the updated_domain in server_domains.json
+    
+    Returns True if successful, False otherwise
+    """
+    try:
+        # Load the server domains file
+        domains_path = os.path.join(BASE_DIR, "server_domains.json")
+        with open(domains_path, 'r') as f:
+            domains = json.load(f)
+        
+        # Find which server number was used for this subdomain
+        server_num = None
+        for num, data in domains.items():
+            if data.get('updated_domain', '').lower() == subdomain.lower():
+                server_num = num
+                break
+        
+        if not server_num:
+            print(f"⚠️ Could not find server number for subdomain: {subdomain}")
+            return False
+        
+        # Get the original domain
+        original_domain = domains[server_num]['original_domain']
+        
+        # Revert the SRV record
+        if update_srv_record_name(subdomain, original_domain):
+            # Clear the updated_domain in server_domains.json
+            domains[server_num]['updated_domain'] = ""
+            
+            with open(domains_path, 'w') as f:
+                json.dump(domains, f, indent=4)
+            
+            print(f"✅ Reverted domain {subdomain} back to {original_domain}")
+            return True
+        else:
+            print(f"⚠️ Failed to revert SRV record for {subdomain}")
+            return False
+        
+    except Exception as e:
+        print(f"⚠️ Error reverting server domain: {e}")
+        return False
+
+def assign_server_domain(requested_subdomain):
+    """
+    Assigns a server domain based on user request.
+    1. Checks if the requested subdomain is available
+    2. Finds the lowest numbered server without an updated_domain
+    3. Updates server_domains.json
+    4. Updates the SRV record
+    
+    Returns (original_domain, updated_domain) or (None, None) if failed
+    """
+    try:
+        # Load the server domains file
+        domains_path = os.path.join(BASE_DIR, "server_domains.json")
+        with open(domains_path, 'r') as f:
+            domains = json.load(f)
+        
+        # Check if requested_subdomain is already in use
+        for server_num, data in domains.items():
+            if data.get('updated_domain', '').lower() == requested_subdomain.lower():
+                print(f"⚠️ Requested subdomain '{requested_subdomain}' is already in use")
+                return None, None
+        
+        # Find the lowest numbered server without an updated_domain
+        available_server = None
+        for i in range(1, 101):  # Assuming servers are numbered 1-100
+            server_num = str(i)
+            if server_num in domains and not domains[server_num].get('updated_domain'):
+                available_server = server_num
+                break
+        
+        if not available_server:
+            print("⚠️ No available server slots")
+            return None, None
+        
+        # Update the server_domains.json file
+        original_domain = domains[available_server]['original_domain']
+        domains[available_server]['updated_domain'] = requested_subdomain
+        
+        with open(domains_path, 'w') as f:
+            json.dump(domains, f, indent=4)
+        
+        print(f"✅ Reserved domain {requested_subdomain} (was {original_domain})")
+        
+        # Update the SRV record to point to the new subdomain
+        update_srv_record_name(original_domain, requested_subdomain)
+        
+        return original_domain, requested_subdomain
+        
+    except Exception as e:
+        print(f"⚠️ Error assigning server domain: {e}")
+        return None, None
+
+def update_srv_record_name(old_domain, new_domain):
+    """Update an SRV record name from old_domain to new_domain"""
+    try:
+        # Get Cloudflare API credentials
+        cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+        cf_zone_id = os.environ.get("CLOUDFLARE_ZONE_ID")
+        
+        if not cf_api_token or not cf_zone_id:
+            print("⚠️ Cloudflare API credentials not found in environment variables")
+            return False
+        
+        # Record names in Cloudflare format
+        old_record_name = f"_minecraft._tcp.{old_domain}"
+        new_record_name = f"_minecraft._tcp.{new_domain}"
+        
+        # Find the existing SRV record
+        url = f"https://api.cloudflare.com/client/v4/zones/{cf_zone_id}/dns_records"
+        headers = {
+            "Authorization": f"Bearer {cf_api_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            params={"name": old_record_name}
+        )
+        
+        if response.status_code != 200:
+            print(f"⚠️ Failed to query DNS records: {response.status_code}")
+            return False
+        
+        records = response.json().get('result', [])
+        if not records:
+            print(f"⚠️ No SRV record found for {old_record_name}")
+            return False
+        
+        # Update the matching SRV record
+        for record in records:
+            if record['type'] == 'SRV' and record['name'] == old_record_name:
+                record_id = record['id']
+                
+                # Get the current data
+                current_data = record['data']
+                current_data['name'] = new_domain
+                
+                # Update the record with new name
+                update_url = f"{url}/{record_id}"
+                update_data = {
+                    "type": "SRV",
+                    "name": new_record_name,
+                    "data": current_data,
+                    "ttl": 60
+                }
+                
+                response = requests.put(update_url, headers=headers, json=update_data)
+                
+                if response.status_code == 200:
+                    print(f"✅ Updated SRV record name from {old_domain} to {new_domain}")
+                    return True
+                else:
+                    print(f"⚠️ Failed to update SRV record: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    return False
+        
+        print(f"⚠️ No matching SRV record found for {old_record_name}")
+        return False
+        
+    except Exception as e:
+        print(f"⚠️ Error updating SRV record name: {e}")
+        return False
+
 def load_server_configs():
     global servers
     pull_latest()
@@ -540,7 +711,7 @@ def create_server():
         seed = request.form.get('seed', '')
         memory = request.form.get('memory', '')
         max_runtime = int(request.form.get('max_runtime', 350))
-        backup_interval = float(request.form.get('backup_interval', 6.0))
+        backup_interval = float(request.form.get('backup_interval', 30.0))
         custom_subdomain = request.form.get('custom_subdomain', '')
         
         # Generate server ID
@@ -736,21 +907,18 @@ def delete_server(server_id):
 
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
     files_to_commit = []
+    
+    # Get the subdomain before deleting
     subdomain = servers[server_id].get('subdomain')
     if subdomain:
-        revert_tunnel_domain(subdomain)
-        print(f"Reverted tunnel domain for {subdomain}")
-        print(f"Files to be committed: {files_to_commit}")
-        
-        # Check and add both possible tunnel map files to ensure consistency
-        tunnel_map_path = os.path.join(BASE_DIR, "tunnel_map.json")
-        tunnel_id_map_path = os.path.join(BASE_DIR, "tunnel_id_map.json")
-        
-        if os.path.exists(tunnel_map_path):
-            files_to_commit.append(tunnel_map_path)
-        
-        if os.path.exists(tunnel_id_map_path):
-            files_to_commit.append(tunnel_id_map_path)
+        if revert_server_domain(server_id, subdomain):
+            print(f"Reverted domain for {subdomain}")
+            
+            # Add server_domains.json to the files to commit
+            domains_path = os.path.join(BASE_DIR, "server_domains.json")
+            if os.path.exists(domains_path):
+                files_to_commit.append(domains_path)
+    
     if os.path.exists(config_path):
         os.remove(config_path)
         files_to_commit.append(config_path)
@@ -852,6 +1020,32 @@ def edit_properties(server_id):
     except Exception as e:
         flash(f'Failed to update server.properties: {e}', 'error')
     return redirect(url_for('view_server', server_id=server_id))
+
+@app.route('/api/server/<server_id>/status')
+def server_status_api(server_id):
+    load_server_configs()
+    if server_id not in servers:
+        return jsonify({'error': 'Server not found'}), 404
+        
+    server = servers[server_id]
+    active_workflows = get_active_github_workflows()
+    is_active = any(w.get('server_id') == server_id for w in active_workflows) or server.get('is_active', False)
+    
+    # Get command response
+    config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    last_command_response = ""
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        last_command_response = config.get('last_command_response', '')
+        
+    return jsonify({
+        'is_active': is_active,
+        'last_command_response': last_command_response,
+        'name': server.get('name', 'Unknown Server'),
+        'type': server.get('type', 'unknown'),
+        'timestamp': int(time.time())
+    })
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown_server_route():

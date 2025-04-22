@@ -1,4 +1,4 @@
-name: Vanilla Minecraft Server
+name: Minecraft Server
 
 on:
   workflow_dispatch:
@@ -6,99 +6,42 @@ on:
       server_id:
         description: 'Server ID'
         required: true
+      action:
+        description: 'Action (start/stop)'
+        required: true
+        default: 'start'
 
 jobs:
-  run:
+  run-minecraft-server:
     runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+    timeout-minutes: 360 # 6 hours max
+    
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
         with:
-          fetch-depth: 0  # Get full history to ensure all files are present
-
-      - name: Configure Git
-        run: |
-          git config --global core.autocrlf false
-          git config --global core.safecrlf false
-          git config --global core.precomposeUnicode false
-          git config --global protocol.version 2
-          git config --global credential.helper store
-
-      - name: Check tunnel_id_map.json status
-        run: |
-          if [ -f "tunnel_id_map.json" ]; then
-            echo "✅ tunnel_id_map.json exists"
-            cat tunnel_id_map.json | head -n 5
-            echo "..."
-          else
-            echo "⚠️ tunnel_id_map.json not found - will be handled by Python code"
-          fi
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install required dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openssh-client openssh-server netcat-openbsd
-
-      - name: Prepare server directory
-        run: mkdir -p servers/${{ inputs.server_id }}
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Download server jar if missing
-        run: |
-          cd servers/${{ inputs.server_id }}
-          if [ ! -f server.jar ]; then
-            curl -o server.jar "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
-          fi
-
-      - name: Accept EULA
-        run: echo "eula=true" > servers/${{ inputs.server_id }}/eula.txt
-
-      - name: Initialize server (generate files only)
-        run: |
-          if [ -d servers/${{ inputs.server_id }} ] && [ "$(ls -A servers/${{ inputs.server_id }})" ]; then
-            echo "Server folder already exists and is not empty, skipping initialization."
-            exit 0
-          fi
-          python3 -u server_helper.py ${{ inputs.server_id }} vanilla true
-
-      - name: Commit generated files
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add servers/${{ inputs.server_id }}
-          git commit -m "Update server files for ${{ inputs.server_id }}" || echo "No changes"
-          git pull --rebase --autostash
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Start server and verify binding
-        run: |
-          # Start the server and let it run for the configured duration
-          python3 -u server_helper.py ${{ inputs.server_id }} vanilla
+          fetch-depth: 0
           
-          # This code will only execute after the server completes
-          echo "Server has completed its scheduled runtime"
-
-      - name: Commit world and server data
-        if: always()
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add servers/${{ inputs.server_id }}
-          git commit -m "Save world and server data for ${{ inputs.server_id }}" || echo "No changes"
-          git pull --rebase --autostash
-          git push
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Download server jar if needed
+        run: |
+          mkdir -p servers/${{ inputs.server_id }}
+          if [ ! -f servers/${{ inputs.server_id }}/server.jar ]; then
+            wget -O servers/${{ inputs.server_id }}/server.jar https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar
+          fi
+          
+      - name: Run server
+        run: python server_helper.py ${{ inputs.server_id }} ${{ inputs.action }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}

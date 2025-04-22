@@ -24,9 +24,9 @@
         </div>
         Status:
         {% if server.is_active %}
-          <span class="badge bg-success">Online</span>
+          <span id="server-status-badge" class="badge bg-success">Online</span>
         {% else %}
-          <span class="badge bg-danger">Offline</span>
+          <span id="server-status-badge" class="badge bg-danger">Offline</span>
         {% endif %}
         
         <!-- Only one Server Address section -->
@@ -60,18 +60,18 @@
         <div class="server-actions">
             {% if server.is_active %}
                 <form action="{{ url_for('stop_server', server_id=server_id) }}" method="post">
-                    <button type="submit" class="btn btn-danger">Stop Server</button>
+                    <button id="stop-server-btn" type="submit" class="btn btn-danger action-btn">Stop Server</button>
                 </form>
             {% else %}
                 <form action="{{ url_for('start_server', server_id=server_id) }}" method="post">
-                    <button class="btn btn-primary" {% if server.is_active %}disabled{% endif %}>
+                    <button id="start-server-btn" class="btn btn-primary action-btn" {% if server.is_active %}disabled{% endif %}>
                       Start Server
                     </button>
                 </form>
             {% endif %}
             
             <!-- Delete Server Button (triggers modal) -->
-            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">
+            <button type="button" class="btn btn-danger action-btn" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">
                 Delete Server
             </button>
 
@@ -93,7 +93,7 @@
                   </div>
                   <div class="modal-footer">
                     <form action="{{ url_for('delete_server', server_id=server_id) }}" method="post">
-                      <button type="submit" class="btn btn-danger">Yes, Delete</button>
+                      <button type="submit" class="btn btn-danger action-btn">Yes, Delete</button>
                     </form>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                   </div>
@@ -161,12 +161,12 @@
             <!-- Command Form: Always visible -->
             <div class="card">
                 <h3>Send Command</h3>
-                <form action="{{ url_for('send_command', server_id=server_id) }}" method="post">
+                <form id="command-form" action="{{ url_for('send_command', server_id=server_id) }}" method="post">
                     <input type="text" name="command" placeholder="Enter server command..." required>
                     <button type="submit" class="btn">Send</button>
                 </form>
                 {% if server.last_command_response %}
-                    <div class="command-response" style="margin-top: 1em;">
+                    <div id="command-response" class="command-response" style="margin-top: 1em;">
                         <strong>Last Command Response:</strong>
                         <pre>{{ server.last_command_response }}</pre>
                     </div>
@@ -182,6 +182,16 @@
                 </form>
             </div>
             {% endif %}
+            
+            <div class="card">
+                <h3>Backup Configuration</h3>
+                <div class="form-group">
+                    <label for="backup_interval">Backup Interval (minutes)</label>
+                    <input type="number" class="form-control" id="backup_interval" name="backup_interval" 
+                           value="30" min="10" max="1440" step="5">
+                    <small class="form-text text-muted">How often should automatic backups be created (in minutes)</small>
+                </div>
+            </div>
         </div>
         
         <a href="{{ url_for('index') }}">← Back to Server List</a>
@@ -212,6 +222,56 @@
 
         // Open the default tab
         document.getElementById("defaultOpen").click();
+    </script>
+    <script>
+        // Auto-refresh parts of the page
+        function refreshServerStatus() {
+            fetch('/api/server/{{ server_id }}/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update status indicators
+                    const statusBadge = document.getElementById('server-status-badge');
+                    if (statusBadge) {
+                        statusBadge.className = data.is_active ? 'badge bg-success' : 'badge bg-danger';
+                        statusBadge.textContent = data.is_active ? 'Running' : 'Stopped';
+                    }
+                    
+                    // Update command response area
+                    const responseArea = document.getElementById('command-response');
+                    if (responseArea) {
+                        responseArea.textContent = data.last_command_response || 'No commands sent yet';
+                    }
+                    
+                    // Update button visibility based on server status
+                    const startBtn = document.getElementById('start-server-btn');
+                    const stopBtn = document.getElementById('stop-server-btn');
+                    if (startBtn && stopBtn) {
+                        startBtn.style.display = data.is_active ? 'none' : 'inline-block';
+                        stopBtn.style.display = data.is_active ? 'inline-block' : 'none';
+                    }
+                })
+                .catch(error => console.error('Error refreshing server status:', error));
+        }
+
+        // Refresh status every 5 seconds
+        setInterval(refreshServerStatus, 5000);
+
+        // Also refresh immediately after sending a command
+        document.getElementById('command-form').addEventListener('submit', function(event) {
+            // Let the form submit normally
+            setTimeout(function() {
+                // After a short delay, refresh to show the response
+                refreshServerStatus();
+            }, 2000);  // Wait 2 seconds for the command to process
+        });
+
+        // Add similar event listeners for other actions (start, stop, etc.)
+        document.querySelectorAll('.action-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // Wait a bit then refresh
+                setTimeout(refreshServerStatus, 2000);
+            });
+        });
     </script>
     <!-- Bootstrap 5 JS (for modal functionality) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
