@@ -14,7 +14,7 @@
   "subdomain": "minecraft-test",
   "tunnel_url": "minecraft-test.rileyberycz.co.uk",
   "last_started": 1745321506,
-  "shutdown_request": false,
+  "shutdown_request": true,
   "last_stopped": 1745248699,
   "pending_command": "",
   "last_command_response": "Sent: whitelist add __Rejection__"
