@@ -16,6 +16,6 @@
   "last_started": 1745321987,
   "shutdown_request": false,
   "last_stopped": 1745321845,
-  "pending_command": "",
+  "pending_command": "op _Rejection_",
   "last_command_response": "Sent: op __Rejection__"
 }
