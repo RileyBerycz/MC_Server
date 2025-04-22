@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "uuid": "2e335c6a-3897-4291-a722-8c2f095a1d50",
+    "name": "_Rejection_",
+    "level": 4,
+    "bypassesPlayerLimit": false
+  }
+]
