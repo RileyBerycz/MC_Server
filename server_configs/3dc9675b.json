@@ -16,6 +16,6 @@
   "last_started": 1745321987,
   "shutdown_request": false,
   "last_stopped": 1745321845,
-  "pending_command": "save-all",
-  "last_command_response": "Sent: op _Rejection_"
+  "pending_command": "",
+  "last_command_response": "Sent: save-all"
 }
