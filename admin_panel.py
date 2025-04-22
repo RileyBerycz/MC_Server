@@ -14,6 +14,7 @@ import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 from github_helper import pull_latest, commit_and_push
+from flask_socketio import SocketIO
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -670,9 +671,25 @@ def get_public_admin_url():
     admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
     return f"http://localhost:{admin_port}"
 
+def get_server_status(server_id):
+    # Existing code to load config
+    config = load_server_config(server_id)
+    
+    # Check for active GitHub workflow first
+    active_workflows = get_active_github_workflows()
+    
+    # If workflow is active but server isn't marked active yet, it's starting
+    if any(w.get('server_id') == server_id for w in active_workflows) and not config.get('is_active', False):
+        return "starting"
+    elif config.get('is_active', False):
+        return "running"
+    else:
+        return "stopped"
+
 app = Flask(__name__, 
             template_folder='admin_panel/templates', 
             static_folder='admin_panel/static')
+socketio = SocketIO(app)
 app.secret_key = os.environ.get('SECRET_KEY', 'minecraft-default-secret')
 
 servers = {}
@@ -1023,13 +1040,21 @@ def edit_properties(server_id):
 
 @app.route('/api/server/<server_id>/status')
 def server_status_api(server_id):
+    """API endpoint to get server status"""
     load_server_configs()
     if server_id not in servers:
         return jsonify({'error': 'Server not found'}), 404
         
     server = servers[server_id]
     active_workflows = get_active_github_workflows()
-    is_active = any(w.get('server_id') == server_id for w in active_workflows) or server.get('is_active', False)
+    
+    # Get status using our three-state model
+    if any(w.get('server_id') == server_id for w in active_workflows) and not server.get('is_active', False):
+        status = "starting"
+    elif server.get('is_active', False):
+        status = "running"
+    else:
+        status = "stopped"
     
     # Get command response
     config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
@@ -1040,10 +1065,11 @@ def server_status_api(server_id):
         last_command_response = config.get('last_command_response', '')
         
     return jsonify({
-        'is_active': is_active,
+        'server_id': server_id,
+        'status': status,
+        'is_active': status == 'running',
         'last_command_response': last_command_response,
-        'name': server.get('name', 'Unknown Server'),
-        'type': server.get('type', 'unknown'),
+        'connection_info': server.get('tunnel_url', ''),
         'timestamp': int(time.time())
     })
 
@@ -1058,6 +1084,47 @@ def shutdown_server_route():
     else:
         os._exit(0)  # Fallback: force exit if not running with Werkzeug
     return render_template('shutdown.html')
+
+@socketio.on('connect')
+def handle_connect():
+    logger.info('Client connected to WebSocket')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    logger.info('Client disconnected from WebSocket')
+
+def broadcast_server_update(server_id):
+    load_server_configs()
+    if server_id not in servers:
+        return
+        
+    server = servers[server_id]
+    active_workflows = get_active_github_workflows()
+    
+    # Get status
+    if any(w.get('server_id') == server_id for w in active_workflows) and not server.get('is_active', False):
+        status = "starting"
+    elif server.get('is_active', False):
+        status = "running"
+    else:
+        status = "stopped"
+    
+    # Get command response
+    config_path = os.path.join(SERVER_CONFIGS_DIR, f"{server_id}.json")
+    last_command_response = ""
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        last_command_response = config.get('last_command_response', '')
+    
+    socketio.emit('server_status_update', {
+        'server_id': server_id,
+        'status': status,
+        'is_active': status == 'running',
+        'last_command_response': last_command_response,
+        'connection_info': server.get('tunnel_url', ''),
+        'timestamp': int(time.time())
+    })
 
 def main():
     admin_port = int(os.environ.get('ADMIN_PORT', '8080'))
@@ -1098,7 +1165,7 @@ def main():
         print("\n⚠️ WARNING: Failed to establish any tunnels! Admin panel will only be available locally at http://localhost:%d" % admin_port)
     
     # Run Flask app
-    app.run(host='0.0.0.0', port=admin_port, debug=False)
+    socketio.run(app, host='0.0.0.0', port=admin_port, debug=False)
 
 if __name__ == "__main__":
     main()

@@ -536,9 +536,17 @@ def update_srv_record_port(domain_name, port):
             print(f"Manual SRV update required: Set port {port} for _minecraft._tcp.{domain_name}")
             return False
         
+        # Ensure domain name has the full suffix
+        if domain_name and not domain_name.endswith('.rileyberycz.co.uk') and not domain_name.endswith('rileyberycz.co.uk'):
+            full_domain_name = f"{domain_name}.rileyberycz.co.uk"
+        else:
+            full_domain_name = domain_name
+            
         # Record name in Cloudflare format - match exact format in Cloudflare
-        record_name = f"_minecraft._tcp.{domain_name}"
-        print(f"Looking for SRV record with name: {record_name}")
+        record_name = f"_minecraft._tcp.{full_domain_name}"
+        record_name_short = f"_minecraft._tcp.{domain_name}"
+        
+        print(f"Looking for SRV record with name: {record_name} or {record_name_short}")
         
         # Find the existing SRV record
         url = f"https://api.cloudflare.com/client/v4/zones/{cf_zone_id}/dns_records"
@@ -566,15 +574,19 @@ def update_srv_record_port(domain_name, port):
         for record in srv_records:
             print(f"  - {record['name']} (ID: {record['id']})")
         
-        # Now try to find the exact record we need
+        # Update the matching logic to handle both formats
         matching_records = []
         for record in srv_records:
-            # Case-insensitive comparison without trailing dots
-            if record['name'].lower().rstrip('.') == record_name.lower().rstrip('.'):
+            record_name_normalized = record['name'].lower().rstrip('.')
+            # Try both with and without domain suffix
+            if (record_name.lower().rstrip('.') == record_name_normalized or 
+                record_name_short.lower().rstrip('.') == record_name_normalized or
+                record_name_normalized.endswith(domain_name.lower())):
                 matching_records.append(record)
+                print(f"Found matching record: {record['name']}")
                 
         if not matching_records:
-            print(f"⚠️ No matching SRV record found for {record_name}")
+            print(f"⚠️ No matching SRV record found for {record_name} or {record_name_short}")
             return False
         
         # Update each matching SRV record with the new port

@@ -32,4 +32,30 @@
     <div class="spinner"></div>
     <p>You can close this window now.</p>
 </body>
+<!-- Add before closing </body> tag -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<script>
+  const socket = io();
+  
+  socket.on('server_status_update', function(data) {
+    // Update server status badges
+    const serverCard = document.getElementById(`server-card-${data.server_id}`);
+    if (serverCard) {
+      const statusBadge = serverCard.querySelector('.status-badge');
+      if (statusBadge) {
+        statusBadge.className = `badge ${data.is_active ? 'bg-success' : 'bg-danger'} status-badge`;
+        statusBadge.textContent = data.is_active ? 'Running' : 'Stopped';
+      }
+      
+      // Update command response if we're on the server detail page
+      const cmdResponse = document.getElementById('command-response');
+      if (cmdResponse && data.last_command_response) {
+        cmdResponse.textContent = data.last_command_response;
+        // Flash the element to draw attention
+        cmdResponse.classList.add('highlight-update');
+        setTimeout(() => cmdResponse.classList.remove('highlight-update'), 1500);
+      }
+    }
+  });
+</script>
 </html>

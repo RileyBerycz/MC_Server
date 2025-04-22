@@ -1,40 +1,33 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Server View - Minecraft Admin Panel</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <div class="container">
-        <h1>Server Details for {{ server.name }}</h1>
-        <div class="card">
-            <h2>Status: {{ server.status }}</h2>
-            <p>Version: {{ server.version }}</p>
-            <p>Max Players: {{ server.max_players }}</p>
-            <p>Online Players: {{ server.online_players }}</p>
-            <p>Server Address: {{ server.address }}</p>
-            <p>Last Updated: {{ server.last_update | format_timestamp }}</p>
-        </div>
+{% extends "base.html" %}
 
-        <h2>Players</h2>
-        <ul>
-            {% for player in server.players %}
-                <li>{{ player }}</li>
-            {% endfor %}
-        </ul>
+{% block title %}Server View - {{ server.name }}{% endblock %}
 
-        <h2>Actions</h2>
-        <form action="{{ url_for('start_server', server_id=server.id) }}" method="POST">
-            <button type="submit" class="btn">Start Server</button>
-        </form>
-        <form action="{{ url_for('stop_server', server_id=server.id) }}" method="POST">
-            <button type="submit" class="btn">Stop Server</button>
-        </form>
-        <form action="{{ url_for('restart_server', server_id=server.id) }}" method="POST">
-            <button type="submit" class="btn">Restart Server</button>
-        </form>
+{% block content %}
+    <h1>Server Details for {{ server.name }}</h1>
+    <div class="card">
+        <h2>Status: {{ server.status }}</h2>
+        <p>Version: {{ server.version }}</p>
+        <p>Max Players: {{ server.max_players }}</p>
+        <p>Online Players: {{ server.online_players }}</p>
+        <p>Server Address: {{ server.address }}</p>
+        <p>Last Updated: {{ server.last_update | format_timestamp }}</p>
     </div>
-</body>
-</html>
+
+    <h2>Players</h2>
+    <ul>
+        {% for player in server.players %}
+            <li>{{ player }}</li>
+        {% endfor %}
+    </ul>
+
+    <h2>Actions</h2>
+    <form action="{{ url_for('start_server', server_id=server.id) }}" method="POST" class="action-form" data-action="Start">
+        <button type="submit" class="btn">Start Server</button>
+    </form>
+    <form action="{{ url_for('stop_server', server_id=server.id) }}" method="POST" class="action-form" data-action="Stop">
+        <button type="submit" class="btn">Stop Server</button>
+    </form>
+    <form action="{{ url_for('restart_server', server_id=server.id) }}" method="POST" class="action-form" data-action="Restart">
+        <button type="submit" class="btn">Restart Server</button>
+    </form>
+{% endblock %}
